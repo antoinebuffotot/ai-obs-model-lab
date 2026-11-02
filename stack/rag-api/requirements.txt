@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pypdf
+ollama
+chromadb==0.6.3
+numpy<2
+traceloop-sdk
+# OpenInference (TELEMETRY_TYPE=openinference): Ollama instrumentation, spans sent to the OpenTelemetry Collector
+openinference-instrumentation-ollama
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+mcp>=1.12,<2

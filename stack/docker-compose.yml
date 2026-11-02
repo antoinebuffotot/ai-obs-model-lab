@@ -1,0 +1,184 @@
+# AI training stack : Ollama (LLM + embeddings) + ChromaDB + RAG API + Web chat
+services:
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h          # keep the models in memory
+      OLLAMA_MAX_LOADED_MODELS: "2"   # LLM + embedding model
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # one-shot job : pulls the models then exits
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${LLM_MODEL:-qwen2.5:7b} && ollama pull ${EMBED_MODEL:-nomic-embed-text}"]
+    restart: "no"
+
+  chroma:
+    image: chromadb/chroma:0.6.3
+    container_name: chroma
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+  # OpenTelemetry Collector for TELEMETRY_TYPE=openinference (profile started through COMPOSE_PROFILES=openinference in .env):
+  # converts the OpenInference spans to gen_ai.*, derives the gen_ai.client.* metrics, forwards to Dynatrace.
+  # DT_API_TOKEN must be a classic token (dt0c01.*): the collector sends it as "Api-Token".
+  otel-collector:
+    image: ghcr.io/dynatrace/dynatrace-bindplane-otel-collector:1.2.0
+    container_name: otel-collector
+    profiles: ["openinference"]
+    restart: unless-stopped
+    environment:
+      DT_ENDPOINT: https://${DT_TENANT:-}
+      DT_API_TOKEN: ${DT_API_TOKEN:-}
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otel/config.yaml:ro
+
+  rag-api:
+    build: ./rag-api
+    container_name: rag-api
+    restart: unless-stopped
+    depends_on:
+      - ollama
+      - chroma
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      DOCS_DIR: /data/docs
+      # knowledge base: the English documents (name.md) are indexed; DOCS_LANG=fr indexes the French ones (name.fr.md) instead
+      DOCS_LANG: ${DOCS_LANG:-en}
+      VM_FQDN: ${VM_FQDN:-localhost}
+      # Telemetry -> Dynatrace. OPENLLMETRY_ENABLED is the on/off switch, TELEMETRY_TYPE the instrumentation:
+      #   openllmetry (default) = Traceloop SDK -> Dynatrace OTLP directly
+      #   openinference         = OpenInference -> otel-collector -> Dynatrace (scripts/set-telemetry-type.sh)
+      OPENLLMETRY_ENABLED: ${OPENLLMETRY_ENABLED:-false}
+      TELEMETRY_TYPE: ${TELEMETRY_TYPE:-openllmetry}
+      # true = the type can be changed at runtime from the web UI (click on the OpenLLMetry / OpenInference chip);
+      # OpenInference then needs the collector running (COMPOSE_PROFILES=openinference)
+      TELEMETRY_SWITCH: ${TELEMETRY_SWITCH:-true}
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4318
+      DT_TENANT: ${DT_TENANT:-}
+      DT_API_TOKEN: ${DT_API_TOKEN:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-ai-lab-rag-api}
+      # OpenLLMetry records prompts and completions in the LLM span (set to false to keep content out)
+      OPENLLMETRY_TRACE_CONTENT: ${OPENLLMETRY_TRACE_CONTENT:-true}
+      # true = keep the RAG passages in the exported prompt (needed by dt-evals faithfulness; scripts/set-rag-context.sh)
+      OPENLLMETRY_KEEP_RAG: ${OPENLLMETRY_KEEP_RAG:-false}
+      TRACELOOP_TELEMETRY: "false"
+    volumes:
+      - ./docs:/data/docs:ro
+
+  # Agentic AI : same image as rag-api, same local model, its own OpenLLMetry service (ai-lab-agent-api-<vm number>).
+  # OpenLLMetry follows OPENLLMETRY_ENABLED unless AGENT_OPENLLMETRY_ENABLED is set (scripts/set-agent-openllmetry.sh).
+  agent-api:
+    build: ./rag-api
+    container_name: agent-api
+    restart: unless-stopped
+    command: ["uvicorn", "app.agent_main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - ollama
+      - chroma
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      DOCS_DIR: /data/docs
+      VM_FQDN: ${VM_FQDN:-localhost}
+      OPENLLMETRY_ENABLED: ${AGENT_OPENLLMETRY_ENABLED:-${OPENLLMETRY_ENABLED:-false}}
+      TELEMETRY_TYPE: ${TELEMETRY_TYPE:-openllmetry}
+      # true = the type can be changed at runtime from the web UI (click on the OpenLLMetry / OpenInference chip);
+      # OpenInference then needs the collector running (COMPOSE_PROFILES=openinference)
+      TELEMETRY_SWITCH: ${TELEMETRY_SWITCH:-true}
+      OTEL_COLLECTOR_ENDPOINT: http://otel-collector:4318
+      DT_TENANT: ${DT_TENANT:-}
+      DT_API_TOKEN: ${DT_API_TOKEN:-}
+      OTEL_SERVICE_NAME: ${AGENT_OTEL_SERVICE_NAME:-ai-lab-agent-api}
+      OPENLLMETRY_TRACE_CONTENT: ${OPENLLMETRY_TRACE_CONTENT:-true}
+      OPENLLMETRY_KEEP_RAG: ${OPENLLMETRY_KEEP_RAG:-false}
+      TRACELOOP_TELEMETRY: "false"
+      # mcp.json written by the participants in the VS Code web (/workspace/mcp) : MCP servers for the agent
+      MCP_CONFIG: /workspace/mcp/mcp.json
+      # context window of the agent (tools + MCP results + answer); raise it if answers are cut
+      AGENT_NUM_CTX: ${AGENT_NUM_CTX:-8192}
+      # max size (characters) of a tool result given to the model; a longer result is cut AND flagged as truncated
+      TOOL_RESULT_CHARS: ${TOOL_RESULT_CHARS:-6000}
+      # MCP tools are used through a Dynatrace sub-agent (own context); false = give them to the main agent
+      MCP_SUBAGENT: ${MCP_SUBAGENT:-true}
+      DT_AGENT_MAX_STEPS: ${DT_AGENT_MAX_STEPS:-4}
+      # dtctl (Dynatrace CLI): configured by the participants in the VS Code web terminal, same file
+      DTCTL_CONFIG: /workspace/mcp/dtctl-config
+      DTCTL_CONTEXT: ${DTCTL_CONTEXT:-}
+      # skills (SKILL.md) copied by the participants into stack/skills
+      SKILLS_DIR: /workspace/skills
+      SKILL_MAX_CHARS: ${SKILL_MAX_CHARS:-6000}
+    volumes:
+      - ./docs:/data/docs:ro
+      - ./mcp:/workspace/mcp:ro
+      - ./skills:/workspace/skills:ro
+
+  web:
+    image: nginx:alpine
+    container_name: web
+    restart: unless-stopped
+    depends_on:
+      - rag-api
+      - agent-api
+    ports:
+      - "80:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # VS Code in the browser (code-server) on http://<vm>:8080/ : opens /workspace/mcp (= stack/mcp),
+  # the whole stack is mounted under /workspace. The Continue chat uses the local Ollama model.
+  vscode:
+    build: ./vscode
+    container_name: vscode
+    restart: unless-stopped
+    user: "0:0"
+    depends_on:
+      - ollama
+    environment:
+      PASSWORD: ${VSCODE_PASSWORD:-changeme}
+      OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      # `dtctl config ...` run in the terminal writes the file read by the agent
+      DTCTL_CONFIG: /workspace/mcp/dtctl-config
+      # dt-evals (LLM-as-a-judge on the traces): tenant, judge provider and the trainer's shared judge key
+      DT_TENANT: ${DT_TENANT:-}
+      JUDGE_PROVIDER: ${JUDGE_PROVIDER:-openai}
+      JUDGE_MODEL: ${JUDGE_MODEL:-}
+      JUDGE_API_KEY: ${JUDGE_API_KEY:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/workspace
+
+volumes:
+  ollama_data:
+  chroma_data:

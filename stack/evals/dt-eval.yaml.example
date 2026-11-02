@@ -1,0 +1,24 @@
+# Indicative shape of .dt-eval.yaml (the reference is the file written by `dt-evals configure`).
+# Secrets are never stored here: DT_API_TOKEN and the judge API key come from environment variables.
+
+dynatrace:
+  environmentUrl: https://<votre-environnement>.apps.dynatrace.com   # DT_ENV_URL is already set in the terminal
+
+judge:
+  provider: openai          # the trainer's shared key (JUDGE_PROVIDER); model: default of the provider if omitted
+
+scope:
+  service: ai-lab-rag-api-00      # your VM: ai-lab-rag-api-NN (chat) or ai-lab-agent-api-NN (agent)
+  since: 1h
+
+metrics:
+  enabled:
+    - faithfulness
+    - relevance
+    - hallucination
+    - toxicity
+
+alerts:
+  thresholds:
+    faithfulness: 0.7
+    relevance: 0.7

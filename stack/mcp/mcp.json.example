@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "dynatrace-mcp": {
+      "url": "https://<votre-environnement>.apps.dynatrace.com/platform-reserved/mcp-gateway/v0.1/servers/dynatrace-mcp/mcp",
+      "headers": {
+        "Authorization": "Bearer <votre-token-plateforme>"
+      },
+      "tools": ["list_problems", "execute_dql", "find_entity_by_name"]
+    }
+  }
+}

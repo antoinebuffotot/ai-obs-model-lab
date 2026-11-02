@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier IA - Agent</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  /* agent steps */
+  .agent { margin: 0 0 22px; border-left: 3px solid var(--accent); padding-left: 16px; }
+  .step { margin: 0 0 12px; }
+  .step-h { color: var(--muted); font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 4px; }
+  .step .stext { font-family: var(--serif); font-size: 1.02rem; line-height: 1.6; overflow-wrap: anywhere; }
+  .step.thought .stext { color: var(--muted); font-style: italic; }
+  .step.final .stext { font-size: 1.05rem; line-height: 1.65; }
+  .tool {
+    margin: 6px 0; padding: 8px 12px; border-radius: 6px; font-family: var(--ui);
+    background: var(--note); color: var(--note-ink); border: 1px solid var(--note-line); font-size: .85rem;
+  }
+  .tool .th { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .tool .tn { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .tool .ta { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; overflow-wrap: anywhere; }
+  .tool .tr { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9.5em; overflow: auto; cursor: pointer; }
+  .tool .tr.open { max-height: none; }
+  .tool .wait { opacity: .75; }
+  .agent .err { color: var(--err); font-family: var(--ui); font-size: .95rem; }
+  .sub { margin: 8px 0 4px; padding-left: 12px; border-left: 2px solid var(--note-line); }
+  .sub-h { margin: 0 0 4px; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--note-ink); }
+  .sub .step .stext { font-family: var(--ui); font-size: .9rem; line-height: 1.5; }
+  .sub .tool { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  .agent .warn { color: var(--warn); font-family: var(--ui); font-size: .88rem; margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1 data-i18n="title">Atelier IA</h1>
+  <nav class="pages" aria-label="Pages">
+    <a href="/" data-i18n="navChat">Chat</a>
+    <a href="/agent.html" aria-current="page" data-i18n="navAgent">Agent</a>
+  </nav>
+  <div class="status" aria-live="polite">
+    <span class="chip" id="st-model"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-tools"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-dtctl"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-otel"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-oi"><i class="dot"></i><span></span></span>
+  </div>
+  <div class="lang" id="lang" role="group" aria-label="Language"></div>
+</header>
+
+<div class="shell">
+  <aside class="kb">
+    <div class="tabs" role="tablist" data-i18n-aria="tabsAria" aria-label="">
+      <button type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="true" data-i18n="tabSettings">Paramètres</button>
+      <button type="button" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" data-i18n="tabTools">Outils</button>
+      <button type="button" role="tab" id="tab-obs" aria-controls="panel-obs" aria-selected="false" tabindex="-1" data-i18n="tabObs">Observability</button>
+    </div>
+
+    <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
+      <div class="field">
+        <label for="s-model" data-i18n="modelLabel">Modèle</label>
+        <select id="s-model"></select>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="s-pull" placeholder="llama3.2:3b" spellcheck="false" style="flex:1;min-width:0">
+          <button class="btn ghost" id="s-pull-btn" type="button" data-i18n="modelPull">Télécharger</button>
+        </div>
+        <p class="hint" id="pull-status"></p>
+      </div>
+      <div class="field">
+        <label for="s-temp"><span data-i18n="temp">Température</span> <output id="o-temp"></output></label>
+        <input type="range" id="s-temp" min="0" max="2" step="0.05">
+        <p class="hint" data-i18n="tempHint"></p>
+      </div>
+      <div class="field">
+        <label for="s-topk">Top K <output id="o-topk"></output></label>
+        <input type="range" id="s-topk" min="1" max="100" step="1">
+        <p class="hint" data-i18n="topkHint"></p>
+      </div>
+      <div class="field">
+        <label for="s-topp">Top P <output id="o-topp"></output></label>
+        <input type="range" id="s-topp" min="0" max="1" step="0.05">
+        <p class="hint" data-i18n="toppHint"></p>
+      </div>
+      <div class="field">
+        <label for="s-steps"><span data-i18n="steps">Étapes maximum</span> <output id="o-steps"></output></label>
+        <input type="range" id="s-steps" min="1" max="8" step="1">
+        <p class="hint" data-i18n="stepsHint"></p>
+      </div>
+      <div class="field">
+        <label for="s-system" data-i18n="system">Instruction de l'agent</label>
+        <textarea id="s-system" rows="9" spellcheck="false"></textarea>
+        <p class="hint" data-i18n="systemHint"></p>
+      </div>
+      <button class="btn ghost" id="s-reset" type="button" data-i18n="reset">Rétablir les valeurs par défaut</button>
+      <p class="hint" style="margin-top:10px" data-i18n="resetNote"></p>
+    </section>
+
+    <section id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
+      <p class="hint" data-i18n="toolsHint"></p>
+      <ul id="tools-list"></ul>
+      <h3 class="mcp-h" id="mcp-head"></h3>
+      <ul id="mcp-status"></ul>
+      <h3 class="mcp-h" id="dt-head"></h3>
+      <ul id="dt-status"></ul>
+    </section>
+
+    <section id="panel-obs" role="tabpanel" aria-labelledby="tab-obs" hidden>
+      <p class="hint" data-i18n="obsHint"></p>
+      <p class="hint" id="obs-service"></p>
+    </section>
+  </aside>
+
+  <main class="codeview" id="codeview" hidden>
+    <div class="file" id="code-file">app/telemetry.py</div>
+    <pre><code id="code-body"></code></pre>
+  </main>
+
+  <main class="chat" id="chatview">
+    <div id="notice" class="notice" hidden></div>
+    <div id="log" role="log" aria-live="polite">
+      <div class="col" id="messages">
+        <section id="empty">
+          <h2 data-i18n="emptyTitle">Confiez une tâche à l'agent</h2>
+          <p data-i18n="emptyText"></p>
+          <div class="starters">
+            <button type="button" data-i18n="starter1"></button>
+            <button type="button" data-i18n="starter2"></button>
+            <button type="button" data-i18n="starter3"></button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <form id="composer" autocomplete="off">
+      <div class="col">
+        <textarea id="q" rows="2" data-i18n-ph="placeholder" data-i18n-aria="qAria" placeholder="" aria-label=""></textarea>
+        <div class="row">
+          <span class="hint" style="margin:0" id="run-hint"></span>
+          <button class="btn" id="send" type="submit" data-i18n="send">Envoyer</button>
+        </div>
+      </div>
+    </form>
+  </main>
+</div>
+
+<style>
+  #tools-list, #mcp-status, #dt-status { list-style: none; margin: 0; padding: 0; }
+  .mcp-h { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  #mcp-status li, #dt-status li { padding: 5px 0; font-size: .85rem; overflow-wrap: anywhere; }
+  #mcp-status li.ko, #dt-status li.ko { color: var(--err); }
+  #mcp-status li.ok::before, #dt-status li.ok::before { content: "● "; color: var(--ok); }
+  #tools-list .src { font-size: .72rem; color: var(--note-ink); background: var(--note); border: 1px solid var(--note-line); border-radius: 4px; padding: 0 5px; margin-left: 6px; font-family: var(--ui); font-weight: 600; }
+  #tools-list li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .86rem; }
+  #tools-list .n { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; display: block; }
+  #tools-list .d { color: var(--muted); }
+</style>
+
+<script src="common.js"></script>
+<script>
+const getJSON = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(url + " " + r.status); return r.json(); };
+const API = "/agent";   // nginx: /agent/api/* -> agent-api /api/*
+const I18N = {
+  fr: {
+    title: "Atelier IA", pageTitle: "Atelier IA - Agent", navChat: "Chat", navAgent: "Agent", tabsAria: "Panneau latéral",
+    tabSettings: "Paramètres", tabTools: "Outils", tabObs: "Observability", stDtctlOk: "dtctl : prêt", stDtctlNoCfg: "dtctl : non configuré", stDtctlMissing: "dtctl : non installé", stDtctlWait: "dtctl : en attente", dtHead: "Dynatrace (sous-agent)", dtctlMissing: "dtctl : non installé dans cette image", dtctlNoConfig: "dtctl : non configuré ({file} introuvable)", dtctlOk: "dtctl : prêt (lecture seule)", skillsNone: "Skills : aucune ({dir})", skillsOk: "Skills : {n} ({names})", subAgent: "Sous-agent Dynatrace", warnLength: "Réponse coupée : la limite de contexte du modèle ({ctx} jetons) a été atteinte. Réduisez le nombre d'outils MCP dans mcp.json ou augmentez AGENT_NUM_CTX.", warnContext: "Contexte presque plein ({tokens} / {ctx} jetons) : le modèle risque de perdre le début du prompt ou de couper sa réponse. Réduisez les outils MCP dans mcp.json ou augmentez AGENT_NUM_CTX.", mcpNone: "Aucun fichier mcp.json : créez-le dans VS Code web (dossier {file}) pour ajouter des outils MCP.", mcpOk: "{name} : {n} outil(s) MCP", mcpKo: "{name} : {error}", mcpHead: "Serveurs MCP",
+    temp: "Température", tempHint: "Basse : décisions stables et prévisibles. Haute : plus de variété.",
+    topkHint: "Nombre de jetons candidats examinés à chaque étape. Bas : plus prudent.",
+    toppHint: "Ne garde que les candidats dont la probabilité cumulée atteint cette valeur.",
+    steps: "Étapes maximum", stepsHint: "Nombre maximal d'appels au modèle pour une tâche. À la dernière étape, l'agent doit répondre sans outil.",
+    system: "Instruction de l'agent", systemHint: "Définit le rôle de l'agent et la façon d'utiliser les outils.",
+    reset: "Rétablir les valeurs par défaut", resetNote: "Les réglages s'appliquent à la prochaine tâche.",
+    toolsHint: "Outils que l'agent peut appeler. Le modèle choisit seul quand et avec quels arguments.",
+    obsHint: "Code qui configure OpenLLMetry (Traceloop) pour envoyer les traces de l'agent vers Dynatrace AI Observability.",
+    obsLoading: "Chargement du code…", obsFail: "Code indisponible.", obsService: "Service Dynatrace : {service}",
+    emptyTitle: "Confiez une tâche à l'agent",
+    emptyText: "L'agent utilise le même modèle local que le chat. Il décide seul d'appeler des outils (recherche dans les documents, calcul, heure), lit les résultats, puis répond. Chaque étape est affichée.",
+    starter1: "Quels documents sont disponibles, et que dit celui sur OpenLLMetry ?",
+    starter2: "Calcule (1250 * 1.2) + 340, puis donne la date et l'heure actuelles.",
+    starter3: "Résume en deux phrases ce que l'atelier envoie à Dynatrace comme traces.",
+    placeholder: "Votre tâche (Entrée pour envoyer, Maj+Entrée pour un retour à la ligne)", qAria: "Votre tâche", send: "Envoyer",
+    stModelWait: "Modèle : en attente", stModelOk: "Modèle : {model}", stModelPull: "Modèle : téléchargement de {model}",
+    stTools: "Outils : {n}", stToolsWait: "Outils : en attente",
+    stOtelWait: "OpenLLMetry : en attente", stOtelOn: "OpenLLMetry : actif", stOtelOff: "OpenLLMetry : désactivé", stOiWait: "OpenInference : en attente", stOiOn: "OpenInference : actif", stOiOff: "OpenInference : désactivé", modelLabel: "Modèle", modelPull: "Télécharger", modelPulling: "Téléchargement de {name} : {pct} %", modelDone: "{name} téléchargé", modelNoTools: "sans outils", modelErr: "Échec : {error}",
+    unreachable: "Service injoignable",
+    noticePull: "Le modèle {model} se télécharge sur la VM. L'agent sera disponible dans quelques minutes.",
+    noticeDown: "Le service agent ne répond pas. Vérifiez les conteneurs avec « docker compose ps » sur la VM.",
+    stepLabel: "Étape {n}", running: "L'agent réfléchit…", toolArgs: "Appel", noResult: "Exécution de l'outil…",
+    expand: "Cliquer pour déplier", nothing: "L'agent n'a rien renvoyé.", error: "Erreur {status}",
+    metaDone: "{steps} étapes, {n} jetons, {total} s au total. Réglages : température {t}, top K {k}, top P {p}.",
+  },
+  en: {
+    title: "AI Workshop", pageTitle: "AI Workshop - Agent", navChat: "Chat", navAgent: "Agent", tabsAria: "Side panel",
+    tabSettings: "Settings", tabTools: "Tools", tabObs: "Observability", stDtctlOk: "dtctl: ready", stDtctlNoCfg: "dtctl: not configured", stDtctlMissing: "dtctl: not installed", stDtctlWait: "dtctl: waiting", dtHead: "Dynatrace (sub-agent)", dtctlMissing: "dtctl: not installed in this image", dtctlNoConfig: "dtctl: not configured ({file} not found)", dtctlOk: "dtctl: ready (read-only)", skillsNone: "Skills: none ({dir})", skillsOk: "Skills: {n} ({names})", subAgent: "Dynatrace sub-agent", warnLength: "Answer cut: the model context limit ({ctx} tokens) was reached. Reduce the MCP tools in mcp.json or raise AGENT_NUM_CTX.", warnContext: "Context almost full ({tokens} / {ctx} tokens): the model may lose the start of the prompt or cut its answer. Reduce the MCP tools in mcp.json or raise AGENT_NUM_CTX.", mcpNone: "No mcp.json file: create it in VS Code web (folder {file}) to add MCP tools.", mcpOk: "{name}: {n} MCP tool(s)", mcpKo: "{name}: {error}", mcpHead: "MCP servers",
+    temp: "Temperature", tempHint: "Low: stable, predictable decisions. High: more variety.",
+    topkHint: "Number of candidate tokens considered at each step. Low: more cautious.",
+    toppHint: "Keeps only the candidates whose cumulative probability reaches this value.",
+    steps: "Maximum steps", stepsHint: "Maximum number of model calls for one task. On the last step the agent must answer without a tool.",
+    system: "Agent instruction", systemHint: "Defines the agent's role and how it uses the tools.",
+    reset: "Restore default values", resetNote: "Settings apply to the next task.",
+    toolsHint: "Tools the agent can call. The model decides on its own when to call them and with which arguments.",
+    obsHint: "Code that configures OpenLLMetry (Traceloop) to send the agent traces to Dynatrace AI Observability.",
+    obsLoading: "Loading code…", obsFail: "Code unavailable.", obsService: "Dynatrace service: {service}",
+    emptyTitle: "Give the agent a task",
+    emptyText: "The agent uses the same local model as the chat. It decides on its own to call tools (document search, calculator, clock), reads the results, then answers. Every step is shown.",
+    starter1: "Which documents are available, and what does the one about OpenLLMetry say?",
+    starter2: "Compute (1250 * 1.2) + 340, then give the current date and time.",
+    starter3: "Summarize in two sentences what the workshop sends to Dynatrace as traces.",
+    placeholder: "Your task (Enter to send, Shift+Enter for a new line)", qAria: "Your task", send: "Send",
+    stModelWait: "Model: waiting", stModelOk: "Model: {model}", stModelPull: "Model: downloading {model}",
+    stTools: "Tools: {n}", stToolsWait: "Tools: waiting",
+    stOtelWait: "OpenLLMetry: waiting", stOtelOn: "OpenLLMetry: active", stOtelOff: "OpenLLMetry: disabled", stOiWait: "OpenInference: waiting", stOiOn: "OpenInference: active", stOiOff: "OpenInference: disabled", modelLabel: "Model", modelPull: "Download", modelPulling: "Downloading {name}: {pct}%", modelDone: "{name} downloaded", modelNoTools: "no tools", modelErr: "Failed: {error}",
+    unreachable: "Service unreachable",
+    noticePull: "The model {model} is being downloaded on the VM. The agent will be available in a few minutes.",
+    noticeDown: "The agent service is not responding. Check the containers with \"docker compose ps\" on the VM.",
+    stepLabel: "Step {n}", running: "The agent is thinking…", toolArgs: "Call", noResult: "Running the tool…",
+    expand: "Click to expand", nothing: "The agent returned nothing.", error: "Error {status}",
+    metaDone: "{steps} steps, {n} tokens, {total} s total. Settings: temperature {t}, top K {k}, top P {p}.",
+  },
+  es: {
+    title: "Taller de IA", pageTitle: "Taller de IA - Agente", navChat: "Chat", navAgent: "Agente", tabsAria: "Panel lateral",
+    tabSettings: "Ajustes", tabTools: "Herramientas", tabObs: "Observability", stDtctlOk: "dtctl: listo", stDtctlNoCfg: "dtctl: sin configurar", stDtctlMissing: "dtctl: no instalado", stDtctlWait: "dtctl: en espera", dtHead: "Dynatrace (subagente)", dtctlMissing: "dtctl: no instalado en esta imagen", dtctlNoConfig: "dtctl: sin configurar ({file} no encontrado)", dtctlOk: "dtctl: listo (solo lectura)", skillsNone: "Skills: ninguna ({dir})", skillsOk: "Skills: {n} ({names})", subAgent: "Subagente Dynatrace", warnLength: "Respuesta cortada: se alcanzó el límite de contexto del modelo ({ctx} tokens). Reduzca las herramientas MCP en mcp.json o aumente AGENT_NUM_CTX.", warnContext: "Contexto casi lleno ({tokens} / {ctx} tokens): el modelo puede perder el principio del prompt o cortar su respuesta. Reduzca las herramientas MCP en mcp.json o aumente AGENT_NUM_CTX.", mcpNone: "Ningún archivo mcp.json: créelo en VS Code web (carpeta {file}) para añadir herramientas MCP.", mcpOk: "{name}: {n} herramienta(s) MCP", mcpKo: "{name}: {error}", mcpHead: "Servidores MCP",
+    temp: "Temperatura", tempHint: "Baja: decisiones estables y predecibles. Alta: más variedad.",
+    topkHint: "Número de tokens candidatos examinados en cada paso. Bajo: más prudente.",
+    toppHint: "Conserva solo los candidatos cuya probabilidad acumulada alcanza este valor.",
+    steps: "Pasos máximos", stepsHint: "Número máximo de llamadas al modelo para una tarea. En el último paso, el agente debe responder sin herramienta.",
+    system: "Instrucción del agente", systemHint: "Define el rol del agente y cómo usa las herramientas.",
+    reset: "Restablecer valores predeterminados", resetNote: "Los ajustes se aplican a la siguiente tarea.",
+    toolsHint: "Herramientas que el agente puede llamar. El modelo decide solo cuándo y con qué argumentos.",
+    obsHint: "Código que configura OpenLLMetry (Traceloop) para enviar las trazas del agente a Dynatrace AI Observability.",
+    obsLoading: "Cargando el código…", obsFail: "Código no disponible.", obsService: "Servicio Dynatrace: {service}",
+    emptyTitle: "Encargue una tarea al agente",
+    emptyText: "El agente usa el mismo modelo local que el chat. Decide solo llamar a herramientas (búsqueda en documentos, calculadora, hora), lee los resultados y responde. Se muestra cada paso.",
+    starter1: "¿Qué documentos hay disponibles y qué dice el de OpenLLMetry?",
+    starter2: "Calcula (1250 * 1.2) + 340 y luego indica la fecha y hora actuales.",
+    starter3: "Resume en dos frases qué trazas envía el taller a Dynatrace.",
+    placeholder: "Su tarea (Intro para enviar, Mayús+Intro para salto de línea)", qAria: "Su tarea", send: "Enviar",
+    stModelWait: "Modelo: en espera", stModelOk: "Modelo: {model}", stModelPull: "Modelo: descargando {model}",
+    stTools: "Herramientas: {n}", stToolsWait: "Herramientas: en espera",
+    stOtelWait: "OpenLLMetry: en espera", stOtelOn: "OpenLLMetry: activo", stOtelOff: "OpenLLMetry: desactivado", stOiWait: "OpenInference: en espera", stOiOn: "OpenInference: activo", stOiOff: "OpenInference: desactivado", modelLabel: "Modelo", modelPull: "Descargar", modelPulling: "Descargando {name}: {pct} %", modelDone: "{name} descargado", modelNoTools: "sin herramientas", modelErr: "Error: {error}",
+    unreachable: "Servicio inaccesible",
+    noticePull: "El modelo {model} se está descargando en la VM. El agente estará disponible en unos minutos.",
+    noticeDown: "El servicio del agente no responde. Compruebe los contenedores con «docker compose ps» en la VM.",
+    stepLabel: "Paso {n}", running: "El agente está pensando…", toolArgs: "Llamada", noResult: "Ejecutando la herramienta…",
+    expand: "Clic para desplegar", nothing: "El agente no ha devuelto nada.", error: "Error {status}",
+    metaDone: "{steps} pasos, {n} tokens, {total} s en total. Ajustes: temperatura {t}, top K {k}, top P {p}.",
+  },
+  de: {
+    title: "KI-Workshop", pageTitle: "KI-Workshop - Agent", navChat: "Chat", navAgent: "Agent", tabsAria: "Seitenleiste",
+    tabSettings: "Einstellungen", tabTools: "Werkzeuge", tabObs: "Observability", stDtctlOk: "dtctl: bereit", stDtctlNoCfg: "dtctl: nicht konfiguriert", stDtctlMissing: "dtctl: nicht installiert", stDtctlWait: "dtctl: wartet", dtHead: "Dynatrace (Sub-Agent)", dtctlMissing: "dtctl: in diesem Image nicht installiert", dtctlNoConfig: "dtctl: nicht konfiguriert ({file} nicht gefunden)", dtctlOk: "dtctl: bereit (nur Lesezugriff)", skillsNone: "Skills: keine ({dir})", skillsOk: "Skills: {n} ({names})", subAgent: "Dynatrace-Sub-Agent", warnLength: "Antwort abgeschnitten: Das Kontextlimit des Modells ({ctx} Tokens) wurde erreicht. Reduzieren Sie die MCP-Werkzeuge in mcp.json oder erhöhen Sie AGENT_NUM_CTX.", warnContext: "Kontext fast voll ({tokens} / {ctx} Tokens): Das Modell kann den Anfang des Prompts verlieren oder seine Antwort abschneiden. Reduzieren Sie die MCP-Werkzeuge in mcp.json oder erhöhen Sie AGENT_NUM_CTX.", mcpNone: "Keine mcp.json-Datei: Legen Sie sie in VS Code web an (Ordner {file}), um MCP-Werkzeuge hinzuzufügen.", mcpOk: "{name}: {n} MCP-Werkzeug(e)", mcpKo: "{name}: {error}", mcpHead: "MCP-Server",
+    temp: "Temperatur", tempHint: "Niedrig: stabile, vorhersehbare Entscheidungen. Hoch: mehr Abwechslung.",
+    topkHint: "Anzahl der in jedem Schritt geprüften Kandidaten-Tokens. Niedrig: vorsichtiger.",
+    toppHint: "Behält nur die Kandidaten, deren kumulierte Wahrscheinlichkeit diesen Wert erreicht.",
+    steps: "Maximale Schritte", stepsHint: "Maximale Anzahl Modellaufrufe pro Aufgabe. Im letzten Schritt muss der Agent ohne Werkzeug antworten.",
+    system: "Anweisung des Agenten", systemHint: "Legt die Rolle des Agenten fest und wie er die Werkzeuge nutzt.",
+    reset: "Standardwerte wiederherstellen", resetNote: "Die Einstellungen gelten für die nächste Aufgabe.",
+    toolsHint: "Werkzeuge, die der Agent aufrufen kann. Das Modell entscheidet selbst, wann und mit welchen Argumenten.",
+    obsHint: "Code, der OpenLLMetry (Traceloop) konfiguriert, um die Agent-Traces an Dynatrace AI Observability zu senden.",
+    obsLoading: "Code wird geladen…", obsFail: "Code nicht verfügbar.", obsService: "Dynatrace-Dienst: {service}",
+    emptyTitle: "Geben Sie dem Agenten eine Aufgabe",
+    emptyText: "Der Agent nutzt dasselbe lokale Modell wie der Chat. Er entscheidet selbst, Werkzeuge aufzurufen (Dokumentsuche, Taschenrechner, Uhr), liest die Ergebnisse und antwortet. Jeder Schritt wird angezeigt.",
+    starter1: "Welche Dokumente sind verfügbar, und was steht in dem zu OpenLLMetry?",
+    starter2: "Berechne (1250 * 1.2) + 340 und nenne dann Datum und Uhrzeit.",
+    starter3: "Fasse in zwei Sätzen zusammen, welche Traces der Workshop an Dynatrace sendet.",
+    placeholder: "Ihre Aufgabe (Enter zum Senden, Umschalt+Enter für einen Zeilenumbruch)", qAria: "Ihre Aufgabe", send: "Senden",
+    stModelWait: "Modell: wartet", stModelOk: "Modell: {model}", stModelPull: "Modell: Download von {model}",
+    stTools: "Werkzeuge: {n}", stToolsWait: "Werkzeuge: warten",
+    stOtelWait: "OpenLLMetry: wartet", stOtelOn: "OpenLLMetry: aktiv", stOtelOff: "OpenLLMetry: deaktiviert", stOiWait: "OpenInference: wartet", stOiOn: "OpenInference: aktiv", stOiOff: "OpenInference: deaktiviert", modelLabel: "Modell", modelPull: "Herunterladen", modelPulling: "Lade {name} herunter: {pct} %", modelDone: "{name} heruntergeladen", modelNoTools: "ohne Werkzeuge", modelErr: "Fehler: {error}",
+    unreachable: "Dienst nicht erreichbar",
+    noticePull: "Das Modell {model} wird auf die VM heruntergeladen. Der Agent ist in wenigen Minuten verfügbar.",
+    noticeDown: "Der Agent-Dienst antwortet nicht. Prüfen Sie die Container mit „docker compose ps“ auf der VM.",
+    stepLabel: "Schritt {n}", running: "Der Agent denkt nach…", toolArgs: "Aufruf", noResult: "Werkzeug läuft…",
+    expand: "Zum Ausklappen klicken", nothing: "Der Agent hat nichts zurückgegeben.", error: "Fehler {status}",
+    metaDone: "{steps} Schritte, {n} Tokens, {total} s insgesamt. Einstellungen: Temperatur {t}, Top K {k}, Top P {p}.",
+  },
+  it: {
+    title: "Laboratorio IA", pageTitle: "Laboratorio IA - Agente", navChat: "Chat", navAgent: "Agente", tabsAria: "Pannello laterale",
+    tabSettings: "Impostazioni", tabTools: "Strumenti", tabObs: "Observability", stDtctlOk: "dtctl: pronto", stDtctlNoCfg: "dtctl: non configurato", stDtctlMissing: "dtctl: non installato", stDtctlWait: "dtctl: in attesa", dtHead: "Dynatrace (sotto-agente)", dtctlMissing: "dtctl: non installato in questa immagine", dtctlNoConfig: "dtctl: non configurato ({file} non trovato)", dtctlOk: "dtctl: pronto (sola lettura)", skillsNone: "Skills: nessuna ({dir})", skillsOk: "Skills: {n} ({names})", subAgent: "Sotto-agente Dynatrace", warnLength: "Risposta troncata: è stato raggiunto il limite di contesto del modello ({ctx} token). Riduci gli strumenti MCP in mcp.json o aumenta AGENT_NUM_CTX.", warnContext: "Contesto quasi pieno ({tokens} / {ctx} token): il modello può perdere l'inizio del prompt o troncare la risposta. Riduci gli strumenti MCP in mcp.json o aumenta AGENT_NUM_CTX.", mcpNone: "Nessun file mcp.json: crealo in VS Code web (cartella {file}) per aggiungere strumenti MCP.", mcpOk: "{name}: {n} strumento/i MCP", mcpKo: "{name}: {error}", mcpHead: "Server MCP",
+    temp: "Temperatura", tempHint: "Bassa: decisioni stabili e prevedibili. Alta: più varietà.",
+    topkHint: "Numero di token candidati esaminati a ogni passo. Basso: più prudente.",
+    toppHint: "Mantiene solo i candidati la cui probabilità cumulativa raggiunge questo valore.",
+    steps: "Passi massimi", stepsHint: "Numero massimo di chiamate al modello per un compito. All'ultimo passo l'agente deve rispondere senza strumenti.",
+    system: "Istruzione dell'agente", systemHint: "Definisce il ruolo dell'agente e come usa gli strumenti.",
+    reset: "Ripristina i valori predefiniti", resetNote: "Le impostazioni si applicano al prossimo compito.",
+    toolsHint: "Strumenti che l'agente può chiamare. Il modello decide da solo quando e con quali argomenti.",
+    obsHint: "Codice che configura OpenLLMetry (Traceloop) per inviare le tracce dell'agente a Dynatrace AI Observability.",
+    obsLoading: "Caricamento del codice…", obsFail: "Codice non disponibile.", obsService: "Servizio Dynatrace: {service}",
+    emptyTitle: "Affida un compito all'agente",
+    emptyText: "L'agente usa lo stesso modello locale della chat. Decide da solo di chiamare strumenti (ricerca nei documenti, calcolatrice, orologio), legge i risultati e risponde. Ogni passo è mostrato.",
+    starter1: "Quali documenti sono disponibili e cosa dice quello su OpenLLMetry?",
+    starter2: "Calcola (1250 * 1.2) + 340, poi indica la data e l'ora attuali.",
+    starter3: "Riassumi in due frasi quali tracce il laboratorio invia a Dynatrace.",
+    placeholder: "Il tuo compito (Invio per inviare, Maiusc+Invio per andare a capo)", qAria: "Il tuo compito", send: "Invia",
+    stModelWait: "Modello: in attesa", stModelOk: "Modello: {model}", stModelPull: "Modello: download di {model}",
+    stTools: "Strumenti: {n}", stToolsWait: "Strumenti: in attesa",
+    stOtelWait: "OpenLLMetry: in attesa", stOtelOn: "OpenLLMetry: attivo", stOtelOff: "OpenLLMetry: disattivato", stOiWait: "OpenInference: in attesa", stOiOn: "OpenInference: attivo", stOiOff: "OpenInference: disattivato", modelLabel: "Modello", modelPull: "Scarica", modelPulling: "Download di {name}: {pct}%", modelDone: "{name} scaricato", modelNoTools: "senza strumenti", modelErr: "Errore: {error}",
+    unreachable: "Servizio non raggiungibile",
+    noticePull: "Il modello {model} è in download sulla VM. L'agente sarà disponibile tra pochi minuti.",
+    noticeDown: "Il servizio agente non risponde. Controlla i container con «docker compose ps» sulla VM.",
+    stepLabel: "Passo {n}", running: "L'agente sta pensando…", toolArgs: "Chiamata", noResult: "Esecuzione dello strumento…",
+    expand: "Clicca per espandere", nothing: "L'agente non ha restituito nulla.", error: "Errore {status}",
+    metaDone: "{steps} passi, {n} token, {total} s in totale. Impostazioni: temperatura {t}, top K {k}, top P {p}.",
+  },
+};
+const i18n = makeI18n(I18N);
+const t = i18n.t;
+
+const logEl = $("log"), messages = $("messages"), qEl = $("q"), sendBtn = $("send");
+let history = [], busy = false, health = null, linkDown = false, toolsInfo = [];
+
+/* ---------- status ---------- */
+function setChip(id, cls, label) { const el = $(id); el.className = "chip " + cls; el.lastElementChild.textContent = label; }
+
+// Telemetry type switch: a click on the inactive OpenLLMetry / OpenInference chip activates it (POST /api/telemetry)
+async function switchTelemetry(type) {
+  if (!health || !health.telemetry_switch || (health.openllmetry ? "openllmetry" : "openinference") === type) return;
+  try {
+    const r = await fetch(API + "/api/telemetry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type }) });
+    if (!r.ok) { showNotice((await r.json()).detail || r.statusText); return; }
+    showNotice("");
+  } catch (e) { showNotice(String(e)); return; }
+  refreshHealth();
+}
+function markSwitchable(h) {
+  [["st-otel", "openllmetry"], ["st-oi", "openinference"]].forEach(([id, type]) => {
+    const el = $(id), on = h && h.telemetry_switch && !h[type];
+    el.classList.toggle("switch", !!on); el.onclick = on ? () => switchTelemetry(type) : null;
+    el.title = on ? type : "";
+  });
+}
+function showNotice(text) { const n = $("notice"); n.hidden = !text; n.textContent = text || ""; }
+function renderStatus() {
+  const h = health;
+  if (!h) {
+    setChip("st-model", linkDown ? "err" : "", t(linkDown ? "unreachable" : "stModelWait"));
+    setChip("st-tools", "off", t("stToolsWait")); setChip("st-otel", "off", t("stOtelWait")); setChip("st-oi", "off", t("stOiWait"));
+    setChip("st-dtctl", "off", t("stDtctlWait"));
+    showNotice(linkDown ? t("noticeDown") : ""); $("obs-service").textContent = ""; return;
+  }
+  setChip("st-model", h.models_ready ? "ok" : "", t(h.models_ready ? "stModelOk" : "stModelPull", { model: h.model }));
+  setChip("st-tools", "ok", t("stTools", { n: h.tools.length }));
+  const dt = h.dtctl || {};
+  if (!dt.installed) setChip("st-dtctl", "err", t("stDtctlMissing"));
+  else if (!dt.configured) setChip("st-dtctl", "", t("stDtctlNoCfg"));
+  else setChip("st-dtctl", "ok", t("stDtctlOk"));
+  $("st-dtctl").title = dt.config || "";
+  setChip("st-otel", h.openllmetry ? "ok" : "off", t(h.openllmetry ? "stOtelOn" : "stOtelOff") + (h.openllmetry ? " (" + h.service + ")" : ""));
+  setChip("st-oi", h.openinference ? "ok" : "off", t(h.openinference ? "stOiOn" : "stOiOff") + (h.openinference ? " (" + h.service + ")" : ""));
+  markSwitchable(h);
+  if (!modelList && h.models_ready) loadModels();
+  $("obs-service").textContent = t("obsService", { service: h.service });
+  showNotice(h.models_ready ? "" : t("noticePull", { model: h.model }));
+  renderMcp();
+}
+function renderDt() {
+  const ul = $("dt-status"); $("dt-head").textContent = t("dtHead"); ul.innerHTML = "";
+  const add = (cls, text) => { const li = document.createElement("li"); li.className = cls; li.textContent = text; ul.append(li); };
+  const d = health && health.dtctl, k = health && health.skills;
+  if (d) {
+    if (!d.installed) add("ko", t("dtctlMissing"));
+    else if (!d.configured) add("", t("dtctlNoConfig", { file: d.config }));
+    else add("ok", t("dtctlOk"));
+  }
+  if (k) add(k.count ? "ok" : "", k.count ? t("skillsOk", { n: k.count, names: k.names.join(", ") }) : t("skillsNone", { dir: k.dir }));
+}
+function renderMcp() {
+  renderDt();
+  const m = health && health.mcp, ul = $("mcp-status");
+  $("mcp-head").textContent = t("mcpHead");
+  ul.innerHTML = "";
+  const add = (cls, text) => { const li = document.createElement("li"); li.className = cls; li.textContent = text; ul.append(li); };
+  if (!m || (!m.configured && !m.servers.length)) { add("", t("mcpNone", { file: m ? m.file : "/workspace/mcp/mcp.json" })); return; }
+  if (m.error) add("ko", m.error);
+  for (const s of m.servers) add(s.ok ? "ok" : "ko", s.ok ? t("mcpOk", { name: s.name, n: s.tools.length }) : t("mcpKo", { name: s.name, error: s.error }));
+}
+async function refreshHealth() {
+  try {
+    health = await getJSON(API + "/api/health"); linkDown = false; loadSettings();
+    const sig = JSON.stringify(health.tools);
+    if (sig !== toolsSig) { toolsSig = sig; loadTools(); }
+  } catch { health = null; linkDown = true; }
+  renderStatus(); updateSend();
+}
+function updateSend() { sendBtn.disabled = busy || !(health && health.models_ready); }
+
+/* ---------- settings ---------- */
+const FIELDS = [["temperature", "s-temp", "o-temp", 2], ["top_k", "s-topk", "o-topk", 0], ["top_p", "s-topp", "o-topp", 2], ["max_steps", "s-steps", "o-steps", 0]];
+let defaults = { temperature: 0.2, top_k: 40, top_p: 0.9, max_steps: 5, system_prompt: "" };
+let settings = { ...defaults }, settingsLoaded = false;
+function saveSettings() { try { localStorage.setItem("ailab.agent.settings", JSON.stringify(settings)); } catch {} }
+function paintSettings() {
+  for (const [key, inputId, outId, digits] of FIELDS) { $(inputId).value = settings[key]; $(outId).textContent = i18n.num(settings[key], digits); }
+  $("s-system").value = settings.system_prompt;
+}
+async function loadSettings() {
+  if (settingsLoaded) return;
+  try { defaults = await getJSON(API + "/api/settings"); } catch { return; }
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem("ailab.agent.settings") || "{}"); } catch {}
+  settings = { ...defaults, ...stored };
+  if (isDefaultPrompt(settings.system_prompt)) settings.system_prompt = defaultPrompt();
+  settingsLoaded = true; paintSettings();
+}
+for (const [key, inputId, outId, digits] of FIELDS) {
+  $(inputId).addEventListener("input", (e) => { settings[key] = Number(e.target.value); $(outId).textContent = i18n.num(settings[key], digits); saveSettings(); });
+}
+$("s-system").addEventListener("input", (e) => { settings.system_prompt = e.target.value; saveSettings(); });
+
+/* default system message / agent instruction: follows the selected language until the participant edits it */
+const allDefaultPrompts = () => [defaults.system_prompt, ...Object.values(defaults.system_prompts || {})];
+const defaultPrompt = () => (defaults.system_prompts || {})[i18n.lang] || defaults.system_prompt;
+const isDefaultPrompt = (text) => !String(text || "").trim() || allDefaultPrompts().includes(text);
+function syncPrompt() {
+  if (settingsLoaded && isDefaultPrompt(settings.system_prompt)) { settings.system_prompt = defaultPrompt(); saveSettings(); }
+}
+$("s-reset").onclick = () => { settings = { ...defaults, system_prompt: defaultPrompt() }; paintSettings(); saveSettings(); if (modelList) paintModels(); };
+
+/* ---------- model selector: models installed in Ollama, download of a new one ---------- */
+const MODELS_API = API, SHOW_TOOLS = true;
+let modelList = null;
+function paintModels() {
+  const sel = $("s-model"); sel.innerHTML = "";
+  for (const m of modelList.models) {
+    const o = document.createElement("option"); o.value = m.name;
+    o.textContent = m.name + " (" + m.size_gb + " GB" + (SHOW_TOOLS && !m.tools ? ", " + t("modelNoTools") : "") + ")" + (m.name === modelList.default ? " *" : "");
+    sel.appendChild(o);
+  }
+  const wanted = settings.model || modelList.default;
+  sel.value = [...sel.options].some((o) => o.value === wanted) ? wanted : modelList.default;
+  settings.model = sel.value;
+}
+async function loadModels() {
+  try { const r = await fetch(MODELS_API + "/api/models"); if (r.ok) { modelList = await r.json(); paintModels(); } } catch {}
+}
+$("s-model").addEventListener("change", (e) => { settings.model = e.target.value; saveSettings(); });
+$("s-pull-btn").onclick = async () => {
+  const name = $("s-pull").value.trim(), out = $("pull-status");
+  if (!name) return;
+  $("s-pull-btn").disabled = true;
+  try {
+    const res = await fetch(MODELS_API + "/api/models/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (block.match(/^event: (.*)$/m) || [])[1], data = JSON.parse((block.match(/^data: (.*)$/m) || [, "{}"])[1]);
+        if (ev === "progress" && data.total) out.textContent = t("modelPulling", { name, pct: Math.floor(100 * data.completed / data.total) });
+        else if (ev === "error") throw new Error(data.text);
+        else if (ev === "done") out.textContent = t("modelDone", { name });
+      }
+    }
+    await loadModels();
+  } catch (e) { out.textContent = t("modelErr", { error: e.message }); }
+  $("s-pull-btn").disabled = false;
+};
+
+
+/* ---------- tools list ---------- */
+let toolsSig = "";
+async function loadTools() {
+  try { toolsInfo = await getJSON(API + "/api/tools"); } catch { toolsSig = ""; return; }
+  const ul = $("tools-list"); ul.innerHTML = "";
+  for (const tl of toolsInfo) {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="n"></span><span class="d"></span>';
+    li.querySelector(".n").textContent = tl.name; li.querySelector(".d").textContent = tl.description;
+    if (tl.source && tl.source !== "local") { const b = document.createElement("span"); b.className = "src"; b.textContent = tl.badge || (tl.source === "subagent" ? "sub-agent" : "MCP · " + tl.source); li.querySelector(".n").append(b); }
+    ul.append(li);
+  }
+}
+
+/* ---------- side panel tabs ---------- */
+const tabs = [["tab-settings", "panel-settings"], ["tab-tools", "panel-tools"], ["tab-obs", "panel-obs"]];
+let codeLoaded = false;
+async function loadCode() {
+  if (codeLoaded) return;
+  $("code-body").textContent = t("obsLoading");
+  try {
+    const j = await getJSON(API + "/api/observability/code");
+    $("code-file").textContent = j.file; $("code-body").textContent = j.code; codeLoaded = true;
+  } catch { $("code-body").textContent = t("obsFail"); }
+}
+function selectTab(i) {
+  tabs.forEach(([tab, panel], j) => { $(tab).setAttribute("aria-selected", j === i); $(tab).tabIndex = j === i ? 0 : -1; $(panel).hidden = j !== i; });
+  const obs = tabs[i][0] === "tab-obs";
+  $("chatview").hidden = obs; $("codeview").hidden = !obs;
+  if (obs) loadCode();
+  $(tabs[i][0]).focus();
+}
+tabs.forEach(([tab], i) => {
+  $(tab).addEventListener("click", () => selectTab(i));
+  $(tab).addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); selectTab((i + 1) % tabs.length); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); selectTab((i + tabs.length - 1) % tabs.length); }
+  });
+});
+
+
+/* conversation kept while moving between the Chat and Agent pages (sessionStorage) */
+const TURNS_KEY = "ailab.agent.turns";
+let turns = [];
+try { turns = JSON.parse(sessionStorage.getItem(TURNS_KEY) || "[]").filter((x) => x.events); } catch {}
+function saveTurns() { try { sessionStorage.setItem(TURNS_KEY, JSON.stringify(turns.slice(-20))); } catch {} }
+history = turns.flatMap((x) => [{ role: "user", content: x.task }, { role: "assistant", content: x.answer }]);
+
+/* ---------- agent run ---------- */
+const scrollDown = () => { logEl.scrollTop = logEl.scrollHeight; };
+function addUser(text) { const d = document.createElement("div"); d.className = "msg user"; d.textContent = text; messages.append(d); scrollDown(); }
+function newStep(parent, n) {
+  const d = document.createElement("section"); d.className = "step";
+  d.innerHTML = '<p class="step-h"></p><div class="stext"></div>';
+  d.querySelector(".step-h").textContent = t("stepLabel", { n });
+  d.dataset.n = n; d.text = "";
+  parent.append(d); return d;
+}
+function newToolCard(step, name, args) {
+  const c = document.createElement("div"); c.className = "tool";
+  c.innerHTML = '<div class="th"><span class="tn"></span><span class="ta"></span></div><p class="tr wait"></p>';
+  c.querySelector(".tn").textContent = name;
+  c.querySelector(".ta").textContent = JSON.stringify(args);
+  const r = c.querySelector(".tr"); r.textContent = t("noResult"); r.title = t("expand"); r.onclick = () => r.classList.toggle("open");
+  step.append(c); return c;
+}
+/* the result paragraph of a card (a direct child: the card of ask_dynatrace also contains the sub-agent's cards) */
+const cardResult = (card) => Array.from(card.children).find((el) => el.classList.contains("tr"));
+function makeRun() {
+  const run = document.createElement("article"); run.className = "agent";
+  run.innerHTML = '<div class="steps"></div>' + '<p class="thinking"></p><p class="meta"></p>';
+  return run;
+}
+
+/* One state per run. Events come from the API ("agent" is "main" or "dynatrace"); the same handler replays the
+   saved events when the page is restored. The sub-agent activity is drawn inside the ask_dynatrace card. */
+function newRunState(run) {
+  return { run, steps: run.querySelector(".steps"), main: { step: null, card: null },
+    sub: { step: null, card: null, box: null }, final: null };
+}
+function handleEvent(st, ev, j) {
+  const isSub = j.agent === "dynatrace", who = isSub ? st.sub : st.main;
+  if (ev === "step") {
+    if (isSub) {
+      if (!st.sub.box && st.main.card) {
+        const box = document.createElement("div"); box.className = "sub";
+        box.innerHTML = '<p class="sub-h"></p>'; box.querySelector(".sub-h").textContent = t("subAgent");
+        st.main.card.insertBefore(box, cardResult(st.main.card)); st.sub.box = box;
+      }
+      who.step = newStep(st.sub.box || st.steps, j.n);
+    } else {
+      who.step = newStep(st.steps, j.n); st.sub = { step: null, card: null, box: null };
+    }
+  }
+  else if (ev === "token" && who.step) { who.step.text += j.text; who.step.querySelector(".stext").innerHTML = md(who.step.text); }
+  else if (ev === "tool_call" && who.step) { who.step.classList.add("thought"); who.card = newToolCard(who.step, j.name, j.args); }
+  else if (ev === "tool_result" && who.card) { const r = cardResult(who.card); r.classList.remove("wait"); r.textContent = j.result; }
+  else if (ev === "warning") {
+    const p = document.createElement("p"); p.className = "warn";
+    p.textContent = j.code === "length" ? t("warnLength", { ctx: j.ctx }) : t("warnContext", { tokens: j.tokens, ctx: j.ctx });
+    st.steps.append(p);
+  }
+  else if (ev === "error") { const p = document.createElement("p"); p.className = "err"; p.textContent = j.text; st.steps.append(p); }
+  else if (ev === "done") st.final = j;
+}
+/* the last main step without tool call is the answer */
+function finalizeRun(st) {
+  const steps = Array.from(st.steps.children).filter((el) => el.classList.contains("step"));
+  const last = steps[steps.length - 1];
+  if (last && !last.querySelector(".tool")) { last.classList.add("final"); return last.text; }
+  return "";
+}
+const metaText = (m) => t("metaDone", { steps: m.steps, n: m.tokens, total: m.total_s,
+  t: i18n.num(m.temperature, 2), k: m.top_k, p: i18n.num(m.top_p, 2) });
+
+function renderTurn(turn) {
+  addUser(turn.task);
+  const run = makeRun();
+  run.querySelector(".thinking").remove();
+  const st = newRunState(run);
+  for (const [ev, j] of turn.events) handleEvent(st, ev, j);
+  finalizeRun(st);
+  if (turn.meta) run.querySelector(".meta").textContent = metaText(turn.meta);
+  messages.append(run);
+}
+function restoreTurns() {
+  if (!turns.length) return;
+  const empty = $("empty"); if (empty) empty.remove();
+  turns.forEach(renderTurn);
+}
+
+async function ask(task) {
+  if (busy || !task.trim()) return;
+  busy = true; updateSend();
+  const empty = $("empty"); if (empty) empty.remove();
+  addUser(task);
+  const run = makeRun(), st = newRunState(run), saved = [];
+  run.querySelector(".thinking").textContent = t("running");
+  messages.append(run); scrollDown();
+  const thinking = run.querySelector(".thinking"), meta = run.querySelector(".meta");
+  const used = { ...settings };
+  let finalText = "", errored = false;
+  // events are kept (consecutive tokens merged) so the run can be replayed when the page is reopened
+  const record = (ev, j) => {
+    const last = saved[saved.length - 1];
+    if (ev === "token" && last && last[0] === "token" && last[1].agent === j.agent) last[1].text += j.text;
+    else saved.push([ev, { ...j }]);
+  };
+
+  try {
+    const res = await fetch(API + "/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: task, history: history.slice(-6), model: used.model || "", system_prompt: used.system_prompt, max_steps: used.max_steps,
+        temperature: used.temperature, top_k: used.top_k, top_p: used.top_p,
+      }),
+    });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.detail || t("error", { status: res.status })); }
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+        let ev = "message", data = "";
+        for (const line of raw.split("\n")) { if (line.startsWith("event:")) ev = line.slice(6).trim(); else if (line.startsWith("data:")) data += line.slice(5).trim(); }
+        if (!data) continue;
+        const j = JSON.parse(data);
+        if (ev === "error") errored = true;
+        record(ev, j); handleEvent(st, ev, j); scrollDown();
+      }
+    }
+    finalText = finalizeRun(st);
+    if (st.final) meta.textContent = metaText({ ...st.final, temperature: used.temperature, top_k: used.top_k, top_p: used.top_p });
+    if (!finalText && !errored) { const p = document.createElement("p"); p.textContent = t("nothing"); st.steps.append(p); }
+  } catch (err) {
+    errored = true;
+    const p = document.createElement("p"); p.className = "err"; p.textContent = err.message; st.steps.append(p);
+  }
+  thinking.remove();
+  if (!errored && finalText) {
+    history.push({ role: "user", content: task }, { role: "assistant", content: finalText });
+    turns.push({ task, answer: finalText, events: saved,
+      meta: st.final && { steps: st.final.steps, tokens: st.final.tokens, total_s: st.final.total_s,
+        temperature: used.temperature, top_k: used.top_k, top_p: used.top_p } });
+    saveTurns();
+  }
+  busy = false; updateSend(); qEl.focus();
+}
+
+$("composer").addEventListener("submit", (e) => { e.preventDefault(); const q = qEl.value; qEl.value = ""; ask(q); });
+qEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("composer").requestSubmit(); } });
+document.querySelectorAll(".starters button").forEach((b) => b.addEventListener("click", () => ask(b.textContent)));
+
+/* ---------- language ---------- */
+i18n.switcher("lang", () => { renderStatus(); renderMcp(); syncPrompt(); paintSettings(); document.querySelectorAll(".thinking").forEach((el) => { el.textContent = t("running"); }); });
+restoreTurns();
+i18n.apply(); renderStatus(); paintSettings();
+refreshHealth();
+setInterval(refreshHealth, 5000);
+</script>
+</body>
+</html>

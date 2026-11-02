@@ -1,0 +1,6 @@
+.lab-config
+logs/
+delete_resourcegroup_*.sh
+stack/.env
+__pycache__/
+*.pyc

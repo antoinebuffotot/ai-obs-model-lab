@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier IA - Chat</title>
+<link rel="stylesheet" href="common.css">
+</head>
+<body>
+
+<header class="top">
+  <h1 data-i18n="title">Atelier IA</h1>
+  <nav class="pages" aria-label="Pages">
+    <a href="/" aria-current="page" data-i18n="navChat">Chat</a>
+    <a href="/agent.html" data-i18n="navAgent">Agent</a>
+  </nav>
+  <div class="status" aria-live="polite">
+    <span class="chip" id="st-model"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-docs"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-otel"><i class="dot"></i><span></span></span>
+    <span class="chip off" id="st-oi"><i class="dot"></i><span></span></span>
+  </div>
+  <div class="lang" id="lang" role="group" aria-label="Language"></div>
+</header>
+
+<div class="shell">
+  <aside class="kb">
+    <div class="tabs" role="tablist" data-i18n-aria="tabsAria" aria-label="Panneau latéral">
+      <button type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="true" data-i18n="tabSettings">Paramètres</button>
+      <button type="button" role="tab" id="tab-docs" aria-controls="panel-docs" aria-selected="false" tabindex="-1" data-i18n="tabDocs">Documents</button>
+      <button type="button" role="tab" id="tab-obs" aria-controls="panel-obs" aria-selected="false" tabindex="-1" data-i18n="tabObs">Observability</button>
+    </div>
+
+    <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
+      <div class="field">
+        <label for="s-model" data-i18n="modelLabel">Modèle</label>
+        <select id="s-model"></select>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="s-pull" placeholder="llama3.2:3b" spellcheck="false" style="flex:1;min-width:0">
+          <button class="btn ghost" id="s-pull-btn" type="button" data-i18n="modelPull">Télécharger</button>
+        </div>
+        <p class="hint" id="pull-status"></p>
+      </div>
+      <div class="field">
+        <label for="s-temp"><span data-i18n="temp">Température</span> <output id="o-temp"></output></label>
+        <input type="range" id="s-temp" min="0" max="2" step="0.05">
+        <p class="hint" data-i18n="tempHint">Basse : réponses stables et prévisibles. Haute : réponses plus variées.</p>
+      </div>
+      <div class="field">
+        <label for="s-topk"><span data-i18n="topk">Top K</span> <output id="o-topk"></output></label>
+        <input type="range" id="s-topk" min="1" max="100" step="1">
+        <p class="hint" data-i18n="topkHint">Nombre de jetons candidats examinés à chaque étape. Bas : plus prudent.</p>
+      </div>
+      <div class="field">
+        <label for="s-topp"><span data-i18n="topp">Top P</span> <output id="o-topp"></output></label>
+        <input type="range" id="s-topp" min="0" max="1" step="0.05">
+        <p class="hint" data-i18n="toppHint">Ne garde que les candidats dont la probabilité cumulée atteint cette valeur.</p>
+      </div>
+      <div class="field">
+        <label for="s-pass"><span data-i18n="pass">Passages de documents</span> <output id="o-pass"></output></label>
+        <input type="range" id="s-pass" min="1" max="8" step="1">
+        <p class="hint" data-i18n="passHint">Nombre de passages ajoutés au prompt quand la recherche est cochée.</p>
+      </div>
+      <div class="field">
+        <label for="s-system" data-i18n="system">Message système</label>
+        <textarea id="s-system" rows="9" spellcheck="false"></textarea>
+        <p class="hint" data-i18n="systemHint">Définit le rôle et le ton du modèle. Pour qu'il cite les documents, gardez la consigne sur les numéros entre crochets.</p>
+      </div>
+      <button class="btn ghost" id="s-reset" type="button" data-i18n="reset">Rétablir les valeurs par défaut</button>
+      <p class="hint" style="margin-top:10px" data-i18n="resetNote">Les réglages s'appliquent à la prochaine question.</p>
+    </section>
+
+    <section id="panel-docs" role="tabpanel" aria-labelledby="tab-docs" hidden>
+      <p class="hint" data-i18n="docsHint">Les réponses s'appuient sur ces documents quand l'option de recherche est cochée.</p>
+      <ul id="docs"></ul>
+      <div class="kb-actions">
+        <button class="btn" id="add" type="button" data-i18n="add">Ajouter un document</button>
+        <button class="btn ghost" id="reindex" type="button" data-i18n="reindex">Réindexer les exemples</button>
+        <input type="file" id="file" accept=".txt,.md,.pdf" hidden>
+      </div>
+      <p id="kb-msg" role="status"></p>
+    </section>
+
+    <section id="panel-obs" role="tabpanel" aria-labelledby="tab-obs" hidden>
+      <p class="hint" data-i18n="obsHint">Code qui configure OpenLLMetry (Traceloop) pour envoyer les traces vers Dynatrace AI Observability.</p>
+    </section>
+  </aside>
+
+  <main class="codeview" id="codeview" hidden>
+    <div class="file" id="code-file">app/telemetry.py</div>
+    <pre><code id="code-body"></code></pre>
+  </main>
+
+  <main class="chat" id="chatview">
+    <div id="notice" class="notice" hidden></div>
+    <div id="log" role="log" aria-live="polite">
+      <div class="col" id="messages">
+        <section id="empty">
+          <h2 data-i18n="emptyTitle">Posez une question à votre modèle</h2>
+          <p data-i18n="emptyText">Le modèle tourne sur cette VM, sans GPU. Les réponses arrivent mot à mot, et le débit en jetons par seconde s'affiche à la fin.</p>
+          <div class="starters">
+            <button type="button" data-i18n="starter1">C'est quoi OpenLLMetry ?</button>
+            <button type="button" data-i18n="starter2">Explique le principe du RAG en trois étapes</button>
+            <button type="button" data-i18n="starter3">Quels services tournent sur cette VM ?</button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <form id="composer" autocomplete="off">
+      <div class="col">
+        <textarea id="q" rows="2" data-i18n-ph="placeholder" data-i18n-aria="qAria" placeholder="" aria-label=""></textarea>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="rag" checked> <span data-i18n="rag">Chercher dans les documents</span></label>
+          <button class="btn" id="send" type="submit" data-i18n="send">Envoyer</button>
+        </div>
+      </div>
+    </form>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const logEl = $("log"), messages = $("messages"), qEl = $("q"), sendBtn = $("send");
+let history = [], busy = false, health = null, wasReady = false;
+
+/* ---------- i18n ---------- */
+const I18N = {
+  fr: {
+    title: "Atelier IA", pageTitle: "Atelier IA - Chat", navChat: "Chat", navAgent: "Agent", tabsAria: "Panneau latéral", tabSettings: "Paramètres", tabDocs: "Documents", tabObs: "Observability", obsHint: "Code qui configure OpenLLMetry (Traceloop) pour envoyer les traces vers Dynatrace AI Observability.", obsLoading: "Chargement du code…", obsFail: "Code indisponible.",
+    temp: "Température", tempHint: "Basse : réponses stables et prévisibles. Haute : réponses plus variées.",
+    topk: "Top K", topkHint: "Nombre de jetons candidats examinés à chaque étape. Bas : plus prudent.",
+    topp: "Top P", toppHint: "Ne garde que les candidats dont la probabilité cumulée atteint cette valeur.",
+    pass: "Passages de documents", passHint: "Nombre de passages ajoutés au prompt quand la recherche est cochée.",
+    system: "Message système", systemHint: "Définit le rôle et le ton du modèle. Pour qu'il cite les documents, gardez la consigne sur les numéros entre crochets.",
+    reset: "Rétablir les valeurs par défaut", resetNote: "Les réglages s'appliquent à la prochaine question.",
+    docsHint: "Les réponses s'appuient sur ces documents quand l'option de recherche est cochée.",
+    add: "Ajouter un document", reindex: "Réindexer les exemples",
+    emptyTitle: "Posez une question à votre modèle",
+    emptyText: "Le modèle tourne sur cette VM, sans GPU. Les réponses arrivent mot à mot, et le débit en jetons par seconde s'affiche à la fin.",
+    starter1: "C'est quoi OpenLLMetry ?", starter2: "Explique le principe du RAG en trois étapes", starter3: "Quels services tournent sur cette VM ?",
+    placeholder: "Votre question (Entrée pour envoyer, Maj+Entrée pour un retour à la ligne)", qAria: "Votre question",
+    rag: "Chercher dans les documents", send: "Envoyer",
+    stModelWait: "Modèle : en attente", stModelOk: "Modèle : {model}", stModelPull: "Modèle : téléchargement de {model}",
+    stDocsWait: "Documents : en attente", stDocsOk: "Documents : {n} passages indexés", stDocsRun: "Documents : indexation en cours",
+    stOtelWait: "OpenLLMetry : en attente", stOtelOn: "OpenLLMetry : actif", stOtelOff: "OpenLLMetry : désactivé", stOiWait: "OpenInference : en attente", stOiOn: "OpenInference : actif", stOiOff: "OpenInference : désactivé", modelLabel: "Modèle", modelPull: "Télécharger", modelPulling: "Téléchargement de {name} : {pct} %", modelDone: "{name} téléchargé", modelNoTools: "sans outils", modelErr: "Échec : {error}",
+    unreachable: "Service injoignable",
+    noticePull: "Le modèle {model} se télécharge sur la VM. Le chat sera disponible dans quelques minutes.",
+    noticeIndex: "L'indexation des documents a échoué : {error}",
+    noticeDown: "Le service RAG ne répond pas. Vérifiez les conteneurs avec « docker compose ps » sur la VM.",
+    noDocs: "Aucun document indexé.", docsUnavailable: "Liste indisponible.", remove: "Retirer", removeAria: "Retirer {name}",
+    removed: "{name} retiré.", nPassages: "{n} passages",
+    indexing: "Indexation de {name}…", indexed: "{name} indexé ({n} passages).", indexFail: "Échec de l'indexation.", sendFail: "Échec de l'envoi.",
+    reindexing: "Réindexation en cours…", reindexed: "Documents d'exemple réindexés.", reindexFail: "Échec de la réindexation.",
+    thinking: "Le modèle réfléchit…", usedPassages: "Passages utilisés ({n})", expand: "Cliquer pour déplier", passageAria: "Passage {n}",
+    error: "Erreur {status}", nothing: "Le modèle n'a rien renvoyé.",
+    metaLive: "{n} jetons, {tps} jetons/s",
+    metaDone: "{n} jetons, {tps} jetons/s, {total} s au total. Réglages : température {t}, top K {k}, top P {p}.",
+  },
+  en: {
+    title: "AI Workshop", pageTitle: "AI Workshop - Chat", navChat: "Chat", navAgent: "Agent", tabsAria: "Side panel", tabSettings: "Settings", tabDocs: "Documents", tabObs: "Observability", obsHint: "Code that configures OpenLLMetry (Traceloop) to send traces to Dynatrace AI Observability.", obsLoading: "Loading code…", obsFail: "Code unavailable.",
+    temp: "Temperature", tempHint: "Low: stable, predictable answers. High: more varied answers.",
+    topk: "Top K", topkHint: "Number of candidate tokens considered at each step. Low: more cautious.",
+    topp: "Top P", toppHint: "Keeps only the candidates whose cumulative probability reaches this value.",
+    pass: "Document passages", passHint: "Number of passages added to the prompt when document search is checked.",
+    system: "System message", systemHint: "Defines the role and tone of the model. For it to cite documents, keep the instruction about bracketed numbers.",
+    reset: "Restore default values", resetNote: "Settings apply to the next question.",
+    docsHint: "Answers rely on these documents when the search option is checked.",
+    add: "Add a document", reindex: "Reindex the samples",
+    emptyTitle: "Ask your model a question",
+    emptyText: "The model runs on this VM, without a GPU. Answers arrive word by word, and the throughput in tokens per second is shown at the end.",
+    starter1: "What is OpenLLMetry?", starter2: "Explain the principle of RAG in three steps", starter3: "Which services run on this VM?",
+    placeholder: "Your question (Enter to send, Shift+Enter for a new line)", qAria: "Your question",
+    rag: "Search in documents", send: "Send",
+    stModelWait: "Model: waiting", stModelOk: "Model: {model}", stModelPull: "Model: downloading {model}",
+    stDocsWait: "Documents: waiting", stDocsOk: "Documents: {n} passages indexed", stDocsRun: "Documents: indexing in progress",
+    stOtelWait: "OpenLLMetry: waiting", stOtelOn: "OpenLLMetry: active", stOtelOff: "OpenLLMetry: disabled", stOiWait: "OpenInference: waiting", stOiOn: "OpenInference: active", stOiOff: "OpenInference: disabled", modelLabel: "Model", modelPull: "Download", modelPulling: "Downloading {name}: {pct}%", modelDone: "{name} downloaded", modelNoTools: "no tools", modelErr: "Failed: {error}",
+    unreachable: "Service unreachable",
+    noticePull: "The model {model} is being downloaded on the VM. Chat will be available in a few minutes.",
+    noticeIndex: "Document indexing failed: {error}",
+    noticeDown: "The RAG service is not responding. Check the containers with \"docker compose ps\" on the VM.",
+    noDocs: "No document indexed.", docsUnavailable: "List unavailable.", remove: "Remove", removeAria: "Remove {name}",
+    removed: "{name} removed.", nPassages: "{n} passages",
+    indexing: "Indexing {name}…", indexed: "{name} indexed ({n} passages).", indexFail: "Indexing failed.", sendFail: "Upload failed.",
+    reindexing: "Reindexing in progress…", reindexed: "Sample documents reindexed.", reindexFail: "Reindexing failed.",
+    thinking: "The model is thinking…", usedPassages: "Passages used ({n})", expand: "Click to expand", passageAria: "Passage {n}",
+    error: "Error {status}", nothing: "The model returned nothing.",
+    metaLive: "{n} tokens, {tps} tokens/s",
+    metaDone: "{n} tokens, {tps} tokens/s, {total} s total. Settings: temperature {t}, top K {k}, top P {p}.",
+  },
+  es: {
+    title: "Taller de IA", pageTitle: "Taller de IA - Chat", navChat: "Chat", navAgent: "Agente", tabsAria: "Panel lateral", tabSettings: "Ajustes", tabDocs: "Documentos", tabObs: "Observability", obsHint: "Código que configura OpenLLMetry (Traceloop) para enviar las trazas a Dynatrace AI Observability.", obsLoading: "Cargando el código…", obsFail: "Código no disponible.",
+    temp: "Temperatura", tempHint: "Baja: respuestas estables y predecibles. Alta: respuestas más variadas.",
+    topk: "Top K", topkHint: "Número de tokens candidatos examinados en cada paso. Bajo: más prudente.",
+    topp: "Top P", toppHint: "Conserva solo los candidatos cuya probabilidad acumulada alcanza este valor.",
+    pass: "Fragmentos de documentos", passHint: "Número de fragmentos añadidos al prompt cuando la búsqueda está marcada.",
+    system: "Mensaje del sistema", systemHint: "Define el rol y el tono del modelo. Para que cite los documentos, mantenga la instrucción sobre los números entre corchetes.",
+    reset: "Restablecer valores predeterminados", resetNote: "Los ajustes se aplican a la siguiente pregunta.",
+    docsHint: "Las respuestas se basan en estos documentos cuando la opción de búsqueda está marcada.",
+    add: "Añadir un documento", reindex: "Reindexar los ejemplos",
+    emptyTitle: "Haga una pregunta a su modelo",
+    emptyText: "El modelo se ejecuta en esta VM, sin GPU. Las respuestas llegan palabra por palabra y el rendimiento en tokens por segundo se muestra al final.",
+    starter1: "¿Qué es OpenLLMetry?", starter2: "Explica el principio del RAG en tres pasos", starter3: "¿Qué servicios se ejecutan en esta VM?",
+    placeholder: "Su pregunta (Intro para enviar, Mayús+Intro para salto de línea)", qAria: "Su pregunta",
+    rag: "Buscar en los documentos", send: "Enviar",
+    stModelWait: "Modelo: en espera", stModelOk: "Modelo: {model}", stModelPull: "Modelo: descargando {model}",
+    stDocsWait: "Documentos: en espera", stDocsOk: "Documentos: {n} fragmentos indexados", stDocsRun: "Documentos: indexación en curso",
+    stOtelWait: "OpenLLMetry: en espera", stOtelOn: "OpenLLMetry: activo", stOtelOff: "OpenLLMetry: desactivado", stOiWait: "OpenInference: en espera", stOiOn: "OpenInference: activo", stOiOff: "OpenInference: desactivado", modelLabel: "Modelo", modelPull: "Descargar", modelPulling: "Descargando {name}: {pct} %", modelDone: "{name} descargado", modelNoTools: "sin herramientas", modelErr: "Error: {error}",
+    unreachable: "Servicio inaccesible",
+    noticePull: "El modelo {model} se está descargando en la VM. El chat estará disponible en unos minutos.",
+    noticeIndex: "La indexación de documentos ha fallado: {error}",
+    noticeDown: "El servicio RAG no responde. Compruebe los contenedores con «docker compose ps» en la VM.",
+    noDocs: "Ningún documento indexado.", docsUnavailable: "Lista no disponible.", remove: "Quitar", removeAria: "Quitar {name}",
+    removed: "{name} quitado.", nPassages: "{n} fragmentos",
+    indexing: "Indexando {name}…", indexed: "{name} indexado ({n} fragmentos).", indexFail: "Error de indexación.", sendFail: "Error de envío.",
+    reindexing: "Reindexación en curso…", reindexed: "Documentos de ejemplo reindexados.", reindexFail: "Error de reindexación.",
+    thinking: "El modelo está pensando…", usedPassages: "Fragmentos utilizados ({n})", expand: "Clic para desplegar", passageAria: "Fragmento {n}",
+    error: "Error {status}", nothing: "El modelo no ha devuelto nada.",
+    metaLive: "{n} tokens, {tps} tokens/s",
+    metaDone: "{n} tokens, {tps} tokens/s, {total} s en total. Ajustes: temperatura {t}, top K {k}, top P {p}.",
+  },
+  de: {
+    title: "KI-Workshop", pageTitle: "KI-Workshop - Chat", navChat: "Chat", navAgent: "Agent", tabsAria: "Seitenleiste", tabSettings: "Einstellungen", tabDocs: "Dokumente", tabObs: "Observability", obsHint: "Code, der OpenLLMetry (Traceloop) konfiguriert, um Traces an Dynatrace AI Observability zu senden.", obsLoading: "Code wird geladen…", obsFail: "Code nicht verfügbar.",
+    temp: "Temperatur", tempHint: "Niedrig: stabile, vorhersehbare Antworten. Hoch: abwechslungsreichere Antworten.",
+    topk: "Top K", topkHint: "Anzahl der in jedem Schritt geprüften Kandidaten-Tokens. Niedrig: vorsichtiger.",
+    topp: "Top P", toppHint: "Behält nur die Kandidaten, deren kumulierte Wahrscheinlichkeit diesen Wert erreicht.",
+    pass: "Dokumentpassagen", passHint: "Anzahl der Passagen, die dem Prompt hinzugefügt werden, wenn die Suche aktiviert ist.",
+    system: "Systemnachricht", systemHint: "Legt Rolle und Ton des Modells fest. Damit es Dokumente zitiert, behalten Sie die Anweisung zu den Nummern in eckigen Klammern bei.",
+    reset: "Standardwerte wiederherstellen", resetNote: "Die Einstellungen gelten für die nächste Frage.",
+    docsHint: "Die Antworten stützen sich auf diese Dokumente, wenn die Suchoption aktiviert ist.",
+    add: "Dokument hinzufügen", reindex: "Beispiele neu indizieren",
+    emptyTitle: "Stellen Sie Ihrem Modell eine Frage",
+    emptyText: "Das Modell läuft auf dieser VM, ohne GPU. Die Antworten erscheinen Wort für Wort, und der Durchsatz in Tokens pro Sekunde wird am Ende angezeigt.",
+    starter1: "Was ist OpenLLMetry?", starter2: "Erkläre das RAG-Prinzip in drei Schritten", starter3: "Welche Dienste laufen auf dieser VM?",
+    placeholder: "Ihre Frage (Enter zum Senden, Umschalt+Enter für einen Zeilenumbruch)", qAria: "Ihre Frage",
+    rag: "In Dokumenten suchen", send: "Senden",
+    stModelWait: "Modell: wartet", stModelOk: "Modell: {model}", stModelPull: "Modell: Download von {model}",
+    stDocsWait: "Dokumente: warten", stDocsOk: "Dokumente: {n} Passagen indiziert", stDocsRun: "Dokumente: Indizierung läuft",
+    stOtelWait: "OpenLLMetry: wartet", stOtelOn: "OpenLLMetry: aktiv", stOtelOff: "OpenLLMetry: deaktiviert", stOiWait: "OpenInference: wartet", stOiOn: "OpenInference: aktiv", stOiOff: "OpenInference: deaktiviert", modelLabel: "Modell", modelPull: "Herunterladen", modelPulling: "Lade {name} herunter: {pct} %", modelDone: "{name} heruntergeladen", modelNoTools: "ohne Werkzeuge", modelErr: "Fehler: {error}",
+    unreachable: "Dienst nicht erreichbar",
+    noticePull: "Das Modell {model} wird auf die VM heruntergeladen. Der Chat ist in wenigen Minuten verfügbar.",
+    noticeIndex: "Die Indizierung der Dokumente ist fehlgeschlagen: {error}",
+    noticeDown: "Der RAG-Dienst antwortet nicht. Prüfen Sie die Container mit „docker compose ps“ auf der VM.",
+    noDocs: "Kein Dokument indiziert.", docsUnavailable: "Liste nicht verfügbar.", remove: "Entfernen", removeAria: "{name} entfernen",
+    removed: "{name} entfernt.", nPassages: "{n} Passagen",
+    indexing: "{name} wird indiziert…", indexed: "{name} indiziert ({n} Passagen).", indexFail: "Indizierung fehlgeschlagen.", sendFail: "Upload fehlgeschlagen.",
+    reindexing: "Neuindizierung läuft…", reindexed: "Beispieldokumente neu indiziert.", reindexFail: "Neuindizierung fehlgeschlagen.",
+    thinking: "Das Modell denkt nach…", usedPassages: "Verwendete Passagen ({n})", expand: "Zum Ausklappen klicken", passageAria: "Passage {n}",
+    error: "Fehler {status}", nothing: "Das Modell hat nichts zurückgegeben.",
+    metaLive: "{n} Tokens, {tps} Tokens/s",
+    metaDone: "{n} Tokens, {tps} Tokens/s, {total} s insgesamt. Einstellungen: Temperatur {t}, Top K {k}, Top P {p}.",
+  },
+  it: {
+    title: "Laboratorio IA", pageTitle: "Laboratorio IA - Chat", navChat: "Chat", navAgent: "Agente", tabsAria: "Pannello laterale", tabSettings: "Impostazioni", tabDocs: "Documenti", tabObs: "Observability", obsHint: "Codice che configura OpenLLMetry (Traceloop) per inviare le tracce a Dynatrace AI Observability.", obsLoading: "Caricamento del codice…", obsFail: "Codice non disponibile.",
+    temp: "Temperatura", tempHint: "Bassa: risposte stabili e prevedibili. Alta: risposte più varie.",
+    topk: "Top K", topkHint: "Numero di token candidati esaminati a ogni passo. Basso: più prudente.",
+    topp: "Top P", toppHint: "Mantiene solo i candidati la cui probabilità cumulativa raggiunge questo valore.",
+    pass: "Passaggi di documenti", passHint: "Numero di passaggi aggiunti al prompt quando la ricerca è selezionata.",
+    system: "Messaggio di sistema", systemHint: "Definisce il ruolo e il tono del modello. Perché citi i documenti, mantenga l'istruzione sui numeri tra parentesi quadre.",
+    reset: "Ripristina i valori predefiniti", resetNote: "Le impostazioni si applicano alla prossima domanda.",
+    docsHint: "Le risposte si basano su questi documenti quando l'opzione di ricerca è selezionata.",
+    add: "Aggiungi un documento", reindex: "Reindicizza gli esempi",
+    emptyTitle: "Fai una domanda al tuo modello",
+    emptyText: "Il modello gira su questa VM, senza GPU. Le risposte arrivano parola per parola e la velocità in token al secondo viene mostrata alla fine.",
+    starter1: "Cos'è OpenLLMetry?", starter2: "Spiega il principio del RAG in tre passaggi", starter3: "Quali servizi girano su questa VM?",
+    placeholder: "La tua domanda (Invio per inviare, Maiusc+Invio per andare a capo)", qAria: "La tua domanda",
+    rag: "Cerca nei documenti", send: "Invia",
+    stModelWait: "Modello: in attesa", stModelOk: "Modello: {model}", stModelPull: "Modello: download di {model}",
+    stDocsWait: "Documenti: in attesa", stDocsOk: "Documenti: {n} passaggi indicizzati", stDocsRun: "Documenti: indicizzazione in corso",
+    stOtelWait: "OpenLLMetry: in attesa", stOtelOn: "OpenLLMetry: attivo", stOtelOff: "OpenLLMetry: disattivato", stOiWait: "OpenInference: in attesa", stOiOn: "OpenInference: attivo", stOiOff: "OpenInference: disattivato", modelLabel: "Modello", modelPull: "Scarica", modelPulling: "Download di {name}: {pct}%", modelDone: "{name} scaricato", modelNoTools: "senza strumenti", modelErr: "Errore: {error}",
+    unreachable: "Servizio non raggiungibile",
+    noticePull: "Il modello {model} è in download sulla VM. La chat sarà disponibile tra pochi minuti.",
+    noticeIndex: "Indicizzazione dei documenti non riuscita: {error}",
+    noticeDown: "Il servizio RAG non risponde. Controlla i container con «docker compose ps» sulla VM.",
+    noDocs: "Nessun documento indicizzato.", docsUnavailable: "Elenco non disponibile.", remove: "Rimuovi", removeAria: "Rimuovi {name}",
+    removed: "{name} rimosso.", nPassages: "{n} passaggi",
+    indexing: "Indicizzazione di {name}…", indexed: "{name} indicizzato ({n} passaggi).", indexFail: "Indicizzazione non riuscita.", sendFail: "Invio non riuscito.",
+    reindexing: "Reindicizzazione in corso…", reindexed: "Documenti di esempio reindicizzati.", reindexFail: "Reindicizzazione non riuscita.",
+    thinking: "Il modello sta pensando…", usedPassages: "Passaggi utilizzati ({n})", expand: "Clicca per espandere", passageAria: "Passaggio {n}",
+    error: "Errore {status}", nothing: "Il modello non ha restituito nulla.",
+    metaLive: "{n} token, {tps} token/s",
+    metaDone: "{n} token, {tps} token/s, {total} s in totale. Impostazioni: temperatura {t}, top K {k}, top P {p}.",
+  },
+};
+const FLAGS = {
+  fr: '<rect width="20" height="40" fill="#0055A4"/><rect x="20" width="20" height="40" fill="#fff"/><rect x="40" width="20" height="40" fill="#EF4135"/>',
+  en: '<rect width="60" height="40" fill="#012169"/><path d="M0 0L60 40M60 0L0 40" stroke="#fff" stroke-width="8"/><path d="M0 0L60 40M60 0L0 40" stroke="#C8102E" stroke-width="3"/><path d="M30 0V40M0 20H60" stroke="#fff" stroke-width="13"/><path d="M30 0V40M0 20H60" stroke="#C8102E" stroke-width="8"/>',
+  es: '<rect width="60" height="40" fill="#AA151B"/><rect y="10" width="60" height="20" fill="#F1BF00"/>',
+  de: '<rect width="60" height="13.4" fill="#000"/><rect y="13.3" width="60" height="13.4" fill="#DD0000"/><rect y="26.6" width="60" height="13.4" fill="#FFCE00"/>',
+  it: '<rect width="20" height="40" fill="#009246"/><rect x="20" width="20" height="40" fill="#fff"/><rect x="40" width="20" height="40" fill="#CE2B37"/>',
+};
+const LANGS = [["en", "English"], ["fr", "Français"], ["es", "Español"], ["de", "Deutsch"], ["it", "Italiano"]];
+const DECIMAL = { fr: ",", es: ",", de: ",", it: ",", en: "." };
+let lang = "fr";
+try { const s = localStorage.getItem("ailab.lang"); if (I18N[s]) lang = s; } catch {}
+const t = (key, vars = {}) =>
+  (I18N[lang][key] ?? I18N.fr[key] ?? key).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+
+function applyStaticTexts() {
+  document.documentElement.lang = lang;
+  document.title = t("pageTitle");
+  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => { el.setAttribute("aria-label", t(el.dataset.i18nAria)); });
+  document.querySelectorAll(".lang button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+}
+function buildLangSwitcher() {
+  const box = $("lang");
+  for (const [code, name] of LANGS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.lang = code; b.title = name; b.setAttribute("aria-label", name);
+    b.innerHTML = '<svg viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true">' + FLAGS[code] + '</svg><span class="ln">' + name + "</span>";
+    b.onclick = () => setLang(code);
+    box.append(b);
+  }
+}
+function setLang(code) {
+  lang = code;
+  try { localStorage.setItem("ailab.lang", code); } catch {}
+  applyStaticTexts(); renderStatus(); syncPrompt(); paintSettings();
+  if (wasReady) loadDocs();
+  document.querySelectorAll(".thinking").forEach((el) => { el.textContent = t("thinking"); });
+}
+
+/* ---------- minimal markdown ---------- */
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[(\d{1,2})\]/g, '<sup class="cite" data-n="$1" tabindex="0" role="button" aria-label="' + t("passageAria", { n: "$1" }) + '">$1</sup>');
+}
+function md(src) {
+  const blocks = [];
+  const text = esc(src).replace(/```[\w-]*\n([\s\S]*?)(```|$)/g, (m, code) => {
+    blocks.push("<pre><code>" + code + "</code></pre>");
+    return "\u0000" + (blocks.length - 1) + "\u0000";
+  });
+  const out = []; let list = null, para = [];
+  const flushPara = () => { if (para.length) { out.push("<p>" + inline(para.join(" ")) + "</p>"); para = []; } };
+  const flushList = () => {
+    if (list) { out.push("<" + list.t + ">" + list.items.map((i) => "<li>" + inline(i) + "</li>").join("") + "</" + list.t + ">"); list = null; }
+  };
+  for (const line of text.split("\n")) {
+    let m;
+    if ((m = line.match(/^\s*[-*]\s+(.*)/))) { flushPara(); if (!list || list.t !== "ul") { flushList(); list = { t: "ul", items: [] }; } list.items.push(m[1]); }
+    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { flushPara(); if (!list || list.t !== "ol") { flushList(); list = { t: "ol", items: [] }; } list.items.push(m[1]); }
+    else if (/^\u0000\d+\u0000$/.test(line.trim())) { flushPara(); flushList(); out.push(line.trim()); }
+    else if (!line.trim()) { flushPara(); flushList(); }
+    else if ((m = line.match(/^#{1,4}\s+(.*)/))) { flushPara(); flushList(); out.push("<h4>" + inline(m[1]) + "</h4>"); }
+    else { flushList(); para.push(line.trim()); }
+  }
+  flushPara(); flushList();
+  return out.join("").replace(/\u0000(\d+)\u0000/g, (m, i) => blocks[i]);
+}
+
+/* ---------- status ---------- */
+function setChip(id, cls, label) {
+  const el = $(id); el.className = "chip " + cls; el.lastElementChild.textContent = label;
+}
+function showNotice(text) { const n = $("notice"); n.hidden = !text; n.textContent = text || ""; }
+
+
+// Telemetry type switch: a click on the inactive OpenLLMetry / OpenInference chip activates it (POST /api/telemetry)
+async function switchTelemetry(type) {
+  if (!health || !health.telemetry_switch || (health.openllmetry ? "openllmetry" : "openinference") === type) return;
+  try {
+    const r = await fetch("/api/telemetry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type }) });
+    if (!r.ok) { showNotice((await r.json()).detail || r.statusText); return; }
+    showNotice("");
+  } catch (e) { showNotice(String(e)); return; }
+  refreshHealth();
+}
+function markSwitchable(h) {
+  [["st-otel", "openllmetry"], ["st-oi", "openinference"]].forEach(([id, type]) => {
+    const el = $(id), on = h && h.telemetry_switch && !h[type];
+    el.classList.toggle("switch", !!on); el.onclick = on ? () => switchTelemetry(type) : null;
+    el.title = on ? type : "";
+  });
+}
+
+let linkDown = false;
+function renderStatus() {
+  const h = health;
+  if (!h) {
+    setChip("st-model", linkDown ? "err" : "", t(linkDown ? "unreachable" : "stModelWait"));
+    setChip("st-docs", "off", t("stDocsWait")); setChip("st-otel", "off", t("stOtelWait")); setChip("st-oi", "off", t("stOiWait")); markSwitchable(null);
+    showNotice(linkDown ? t("noticeDown") : "");
+    return;
+  }
+  setChip("st-model", h.models_ready ? "ok" : "", t(h.models_ready ? "stModelOk" : "stModelPull", { model: h.model }));
+  setChip("st-docs", h.bootstrap === "done" ? "ok" : (h.bootstrap === "error" ? "err" : ""),
+    h.bootstrap === "done" ? t("stDocsOk", { n: h.chunks }) : t("stDocsRun"));
+  setChip("st-otel", h.openllmetry ? "ok" : "off", t(h.openllmetry ? "stOtelOn" : "stOtelOff"));
+  setChip("st-oi", h.openinference ? "ok" : "off", t(h.openinference ? "stOiOn" : "stOiOff"));
+  markSwitchable(h);
+  if (!modelList && h.models_ready) loadModels();
+  if (!h.models_ready) showNotice(t("noticePull", { model: h.model }));
+  else if (h.bootstrap === "error") showNotice(t("noticeIndex", { error: h.error }));
+  else showNotice("");
+}
+
+async function refreshHealth() {
+  try {
+    const h = await (await fetch("/api/health")).json();
+    health = h; linkDown = false; loadSettings(); renderStatus();
+    if (h.ready && !wasReady) loadDocs();
+    wasReady = h.ready;
+  } catch {
+    health = null; linkDown = true; renderStatus();
+  }
+  updateSend();
+}
+function updateSend() { sendBtn.disabled = busy || !(health && health.models_ready); }
+
+/* ---------- settings ---------- */
+const FIELDS = [
+  ["temperature", "s-temp", "o-temp", 2],
+  ["top_k", "s-topk", "o-topk", 0],
+  ["top_p", "s-topp", "o-topp", 2],
+  ["passages", "s-pass", "o-pass", 0],
+];
+const fmt = (n, d) => Number(n).toFixed(d).replace(".", DECIMAL[lang]);
+let defaults = { temperature: 0.3, top_k: 40, top_p: 0.9, passages: 3, system_prompt: "" };
+let settings = { ...defaults }, settingsLoaded = false;
+
+function saveSettings() { try { localStorage.setItem("ailab.settings", JSON.stringify(settings)); } catch {} }
+function paintSettings() {
+  for (const [key, inputId, outId, digits] of FIELDS) {
+    $(inputId).value = settings[key]; $(outId).textContent = fmt(settings[key], digits);
+  }
+  $("s-system").value = settings.system_prompt;
+}
+async function loadSettings() {
+  if (settingsLoaded) return;
+  try { defaults = await (await fetch("/api/settings")).json(); } catch { return; }
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem("ailab.settings") || "{}"); } catch {}
+  settings = { ...defaults, ...stored };
+  if (isDefaultPrompt(settings.system_prompt)) settings.system_prompt = defaultPrompt();
+  settingsLoaded = true; paintSettings();
+}
+for (const [key, inputId, outId, digits] of FIELDS) {
+  $(inputId).addEventListener("input", (e) => {
+    settings[key] = Number(e.target.value); $(outId).textContent = fmt(settings[key], digits); saveSettings();
+  });
+}
+$("s-system").addEventListener("input", (e) => { settings.system_prompt = e.target.value; saveSettings(); });
+
+/* default system message / agent instruction: follows the selected language until the participant edits it */
+const allDefaultPrompts = () => [defaults.system_prompt, ...Object.values(defaults.system_prompts || {})];
+const defaultPrompt = () => (defaults.system_prompts || {})[lang] || defaults.system_prompt;
+const isDefaultPrompt = (text) => !String(text || "").trim() || allDefaultPrompts().includes(text);
+function syncPrompt() {
+  if (settingsLoaded && isDefaultPrompt(settings.system_prompt)) { settings.system_prompt = defaultPrompt(); saveSettings(); }
+}
+$("s-reset").onclick = () => { settings = { ...defaults, system_prompt: defaultPrompt() }; paintSettings(); saveSettings(); if (modelList) paintModels(); };
+
+/* ---------- model selector: models installed in Ollama, download of a new one ---------- */
+const MODELS_API = "", SHOW_TOOLS = false;
+let modelList = null;
+function paintModels() {
+  const sel = $("s-model"); sel.innerHTML = "";
+  for (const m of modelList.models) {
+    const o = document.createElement("option"); o.value = m.name;
+    o.textContent = m.name + " (" + m.size_gb + " GB" + (SHOW_TOOLS && !m.tools ? ", " + t("modelNoTools") : "") + ")" + (m.name === modelList.default ? " *" : "");
+    sel.appendChild(o);
+  }
+  const wanted = settings.model || modelList.default;
+  sel.value = [...sel.options].some((o) => o.value === wanted) ? wanted : modelList.default;
+  settings.model = sel.value;
+}
+async function loadModels() {
+  try { const r = await fetch(MODELS_API + "/api/models"); if (r.ok) { modelList = await r.json(); paintModels(); } } catch {}
+}
+$("s-model").addEventListener("change", (e) => { settings.model = e.target.value; saveSettings(); });
+$("s-pull-btn").onclick = async () => {
+  const name = $("s-pull").value.trim(), out = $("pull-status");
+  if (!name) return;
+  $("s-pull-btn").disabled = true;
+  try {
+    const res = await fetch(MODELS_API + "/api/models/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (block.match(/^event: (.*)$/m) || [])[1], data = JSON.parse((block.match(/^data: (.*)$/m) || [, "{}"])[1]);
+        if (ev === "progress" && data.total) out.textContent = t("modelPulling", { name, pct: Math.floor(100 * data.completed / data.total) });
+        else if (ev === "error") throw new Error(data.text);
+        else if (ev === "done") out.textContent = t("modelDone", { name });
+      }
+    }
+    await loadModels();
+  } catch (e) { out.textContent = t("modelErr", { error: e.message }); }
+  $("s-pull-btn").disabled = false;
+};
+
+paintSettings();
+
+/* ---------- side panel tabs ---------- */
+const tabs = [["tab-settings", "panel-settings"], ["tab-docs", "panel-docs"], ["tab-obs", "panel-obs"]];
+function selectTab(i) {
+  tabs.forEach(([tab, panel], j) => {
+    $(tab).setAttribute("aria-selected", j === i); $(tab).tabIndex = j === i ? 0 : -1; $(panel).hidden = j !== i;
+  });
+  const obs = tabs[i][0] === "tab-obs";
+  $("chatview").hidden = obs; $("codeview").hidden = !obs;
+  if (obs) loadCode();
+  $(tabs[i][0]).focus();
+}
+let codeLoaded = false;
+async function loadCode() {
+  if (codeLoaded) return;
+  $("code-body").textContent = t("obsLoading");
+  try {
+    const j = await (await fetch("/api/observability/code")).json();
+    $("code-file").textContent = j.file; $("code-body").textContent = j.code; codeLoaded = true;
+  } catch { $("code-body").textContent = t("obsFail"); }
+}
+tabs.forEach(([t], i) => {
+  $(t).addEventListener("click", () => selectTab(i));
+  $(t).addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); selectTab((i + 1) % tabs.length); }
+  });
+});
+
+/* ---------- documents ---------- */
+function kbMsg(t) { $("kb-msg").textContent = t || ""; }
+async function loadDocs() {
+  const ul = $("docs");
+  try {
+    const docs = await (await fetch("/api/documents")).json();
+    ul.innerHTML = "";
+    if (!docs.length) { ul.innerHTML = ""; const e = document.createElement("li"); e.className = "empty-docs"; e.textContent = t("noDocs"); ul.append(e); return; }
+    for (const d of docs) {
+      const li = document.createElement("li");
+      li.innerHTML = '<span class="name"></span><span class="n"></span><button type="button"></button>';
+      li.querySelector(".name").textContent = d.source;
+      li.querySelector(".n").textContent = t("nPassages", { n: d.chunks });
+      const b = li.querySelector("button"); b.textContent = t("remove"); b.setAttribute("aria-label", t("removeAria", { name: d.source }));
+      b.onclick = async () => { await fetch("/api/documents/" + encodeURIComponent(d.source), { method: "DELETE" }); kbMsg(t("removed", { name: d.source })); loadDocs(); refreshHealth(); };
+      ul.append(li);
+    }
+  } catch { ul.innerHTML = ""; const e = document.createElement("li"); e.className = "empty-docs"; e.textContent = t("docsUnavailable"); ul.append(e); }
+}
+$("add").onclick = () => $("file").click();
+$("file").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  kbMsg(t("indexing", { name: f.name }));
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const j = await r.json();
+    kbMsg(r.ok ? t("indexed", { name: f.name, n: j.chunks }) : (j.detail || t("indexFail")));
+  } catch { kbMsg(t("sendFail")); }
+  e.target.value = ""; loadDocs(); refreshHealth();
+};
+$("reindex").onclick = async () => {
+  kbMsg(t("reindexing"));
+  try { const r = await fetch("/api/ingest", { method: "POST" }); kbMsg(r.ok ? t("reindexed") : t("reindexFail")); }
+  catch { kbMsg(t("reindexFail")); }
+  loadDocs(); refreshHealth();
+};
+
+
+/* conversation kept while moving between the Chat and Agent pages (sessionStorage) */
+const TURNS_KEY = "ailab.chat.turns";
+let turns = [];
+try { turns = JSON.parse(sessionStorage.getItem(TURNS_KEY) || "[]"); } catch {}
+function saveTurns() { try { sessionStorage.setItem(TURNS_KEY, JSON.stringify(turns.slice(-30))); } catch {} }
+history = turns.flatMap((x) => [{ role: "user", content: x.q }, { role: "assistant", content: x.a }]);
+
+/* ---------- chat ---------- */
+const scrollDown = () => { logEl.scrollTop = logEl.scrollHeight; };
+
+function addUser(text) {
+  const d = document.createElement("div"); d.className = "msg user"; d.textContent = text; messages.append(d); scrollDown();
+}
+function addBot() {
+  const d = document.createElement("article"); d.className = "msg bot";
+  d.innerHTML = '<div class="body"><span class="thinking"></span></div><details class="passages" hidden open><summary></summary><ol></ol></details><p class="meta"></p>';
+  d.querySelector(".thinking").textContent = t("thinking"); messages.append(d); scrollDown(); return d;
+}
+function showSources(bot, sources) {
+  const det = bot.querySelector(".passages"), ol = det.querySelector("ol");
+  if (!sources.length) return;
+  det.hidden = false;
+  det.querySelector("summary").textContent = t("usedPassages", { n: sources.length });
+  for (const s of sources) {
+    const li = document.createElement("li"); li.dataset.n = s.n;
+    li.innerHTML = '<div class="ph"><span>[' + s.n + ']</span><span class="src"></span><span class="bar"><i></i></span><span class="pct"></span></div><p class="pt"></p>';
+    li.querySelector(".src").textContent = s.source;
+    li.querySelector(".bar i").style.width = Math.round(s.score * 100) + "%";
+    li.querySelector(".pct").textContent = Math.round(s.score * 100) + " %";
+    const p = li.querySelector(".pt"); p.textContent = s.text; p.title = t("expand"); p.onclick = () => p.classList.toggle("open");
+    ol.append(li);
+  }
+}
+function openPassage(bot, n) {
+  const det = bot.querySelector(".passages"); if (det.hidden) return;
+  det.open = true;
+  const li = det.querySelector('li[data-n="' + n + '"]'); if (!li) return;
+  li.classList.remove("flash"); void li.offsetWidth; li.classList.add("flash");
+  li.scrollIntoView({ block: "nearest" });
+}
+messages.addEventListener("click", (e) => {
+  const c = e.target.closest(".cite"); if (c) openPassage(c.closest(".msg"), c.dataset.n);
+});
+messages.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("cite")) { e.preventDefault(); e.target.click(); }
+});
+
+
+function renderTurn(turn) {
+  addUser(turn.q);
+  const bot = addBot();
+  bot.querySelector(".body").innerHTML = md(turn.a);
+  showSources(bot, turn.sources || []);
+  const m = turn.meta;
+  if (m) bot.querySelector(".meta").textContent = t("metaDone", { n: m.tokens, tps: m.tps, total: m.total_s,
+    t: fmt(m.temperature, 2), k: m.top_k, p: fmt(m.top_p, 2) });
+}
+function restoreTurns() {
+  if (!turns.length) return;
+  const empty = $("empty"); if (empty) empty.remove();
+  turns.forEach(renderTurn);
+}
+
+async function ask(question) {
+  if (busy || !question.trim()) return;
+  busy = true; updateSend();
+  const empty = $("empty"); if (empty) empty.remove();
+  addUser(question);
+  const bot = addBot(), body = bot.querySelector(".body"), meta = bot.querySelector(".meta");
+  const used = { ...settings };
+  let answer = "", count = 0, t0 = 0, errored = false, final = null, srcs = [];
+  const render = () => { body.innerHTML = md(answer); scrollDown(); };
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: question, history: history.slice(-6), use_rag: $("rag").checked,
+        model: used.model || "", passages: used.passages, temperature: used.temperature, top_k: used.top_k, top_p: used.top_p,
+        system_prompt: used.system_prompt,
+      }),
+    });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.detail || t("error", { status: res.status })); }
+    const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+        let ev = "message", data = "";
+        for (const line of raw.split("\n")) { if (line.startsWith("event:")) ev = line.slice(6).trim(); else if (line.startsWith("data:")) data += line.slice(5).trim(); }
+        if (!data) continue;
+        const j = JSON.parse(data);
+        if (ev === "sources") { srcs = j; showSources(bot, j); }
+        else if (ev === "token") {
+          if (!t0) t0 = performance.now();
+          answer += j.text; count++; render();
+          const s = (performance.now() - t0) / 1000;
+          if (s > 0.5) meta.textContent = t("metaLive", { n: count, tps: (count / s).toFixed(1) });
+        }
+        else if (ev === "done") final = j;
+        else if (ev === "error") { errored = true; body.innerHTML = (answer ? md(answer) : "") + '<p class="err"></p>'; body.querySelector(".err").textContent = j.text; }
+      }
+    }
+    if (final) meta.textContent = t("metaDone", { n: final.tokens, tps: final.tps, total: final.total_s,
+      t: fmt(used.temperature, 2), k: used.top_k, p: fmt(used.top_p, 2) });
+    if (!answer && !errored) body.textContent = t("nothing");
+  } catch (err) {
+    errored = true;
+    body.innerHTML = '<p class="err"></p>'; body.querySelector(".err").textContent = err.message;
+  }
+  if (!errored && answer) {
+    history.push({ role: "user", content: question }, { role: "assistant", content: answer });
+    turns.push({ q: question, a: answer, sources: srcs,
+      meta: final && { tokens: final.tokens, tps: final.tps, total_s: final.total_s, temperature: used.temperature, top_k: used.top_k, top_p: used.top_p } });
+    saveTurns();
+  }
+  busy = false; updateSend(); qEl.focus();
+}
+
+$("composer").addEventListener("submit", (e) => { e.preventDefault(); const q = qEl.value; qEl.value = ""; ask(q); });
+qEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("composer").requestSubmit(); } });
+document.querySelectorAll(".starters button").forEach((b) => b.addEventListener("click", () => ask(b.textContent)));
+
+restoreTurns();
+buildLangSwitcher(); applyStaticTexts(); renderStatus();
+refreshHealth();
+setInterval(refreshHealth, 5000);
+</script>
+</body>
+</html>
