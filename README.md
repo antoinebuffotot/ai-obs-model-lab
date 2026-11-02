@@ -1,4 +1,4 @@
-# AI training environment (lab-environment-for-ai-training)
+# AI training environment (ai-obs-model-lab)
 
 [Version française](README.fr.md)
 
@@ -38,9 +38,9 @@ Open your Azure subscription, <https://portal.azure.com/>, then the Cloud Shell 
 In the Cloud Shell, replace `<your-account>` with the GitHub account that hosts this repository:
 
 ```
-cd;if [ -d "./lab-environment-for-ai-training" ];then rm -rf ./lab-environment-for-ai-training;fi
-git clone https://github.com/antoinebuffotot/lab-environment-for-ai-training.git
-cd lab-environment-for-ai-training;chmod +x ./*.sh
+cd;if [ -d "./ai-obs-model-lab" ];then rm -rf ./ai-obs-model-lab;fi
+git clone https://github.com/antoinebuffotot/ai-obs-model-lab.git
+cd ai-obs-model-lab;chmod +x ./*.sh
 ./azure-cli-deploy-vm-for-training-ai.sh
 ```
 

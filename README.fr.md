@@ -1,4 +1,4 @@
-# Environnement de formation à l'IA (lab-environment-for-ai-training)
+# Environnement de formation à l'IA (ai-obs-model-lab)
 
 [English version](README.md)
 
@@ -35,12 +35,12 @@ Ouvrez votre souscription Azure, <https://portal.azure.com/>, puis le Cloud Shel
 
 # Déployer l'environnement de formation
 
-Dans le Cloud Shell, remplacez `<votre-compte>` par le compte GitHub qui héberge ce dépôt :
+Dans le Cloud Shell, remplacez `antoinebuffotot` par le compte GitHub qui héberge ce dépôt :
 
 ```
-cd;if [ -d "./lab-environment-for-ai-training" ];then rm -rf ./lab-environment-for-ai-training;fi
-git clone https://github.com/<votre-compte>/lab-environment-for-ai-training.git
-cd lab-environment-for-ai-training;chmod +x ./*.sh
+cd;if [ -d "./ai-obs-model-lab" ];then rm -rf ./ai-obs-model-lab;fi
+git clone https://github.com/antoinebuffotot/ai-obs-model-lab.git
+cd ai-obs-model-lab;chmod +x ./*.sh
 ./azure-cli-deploy-vm-for-training-ai.sh
 ```
 
